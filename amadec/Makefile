@@ -23,7 +23,7 @@ TARGET_DIR=$(shell pwd)/../../../target
 STAGING_DIR=$(shell pwd)/../../../staging
 CFLAGS+=-O2
 CFLAGS+=-I$(shell pwd) -I$(shell pwd)/include -I${STAGING_DIR}/include -I${STAGING_DIR}/usr/include -L${TARGET_DIR}/lib -L${TARGET_DIR}/usr/lib
-CFLAGS+=-DALSA_OUT -DENABLE_WAIT_FORMAT
+CFLAGS+=-DALSA_OUT -DENABLE_WAIT_FORMAT -fPIC
 
 export CC CFLAGS
 
