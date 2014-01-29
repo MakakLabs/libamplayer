@@ -13,11 +13,13 @@
 #include "player_update.h"
 #include "player_av.h"
 #include "thread_mgt.h"
-
+#define CHAPTER_DISCONTINUE_THRESHOLD          (90000*30)
+#define TSYNC_VDEC_STARTED 1
+#define TSYNC_ADEC_STARTED 2
 
 void media_info_init(media_info_t *info)
 {
-    MEMSET(info, 0, sizeof(media_info_t));
+    //MEMSET(info, 0, sizeof(media_info_t));
     info->stream_info.filename = NULL;
     info->stream_info.cur_audio_index   = -1;
     info->stream_info.cur_sub_index     = -1;
@@ -50,6 +52,12 @@ static int set_stream_info(play_para_t *p_para)
     } else {
         info->seekable = 1;
     }
+
+	if(info->seekable == 0){
+		log_print("amplayer send PLAYER_EVENTS_NOT_SUPPORT_SEEKABLE\n");
+		send_event(p_para, PLAYER_EVENTS_NOT_SUPPORT_SEEKABLE, 0, 0);
+	}
+	
     if (info->total_video_num > MAX_VIDEO_STREAMS) {
         log_error("[set_stream_info]too much video streams(%d)!\n ", info->total_video_num);
         return -2;
@@ -82,8 +90,15 @@ static int set_vstream_info(play_para_t *p_para)
         unsigned int i;
         int vnum = 0;
         AVStream *pStream;
+        
         for (i = 0; i < pCtx->nb_streams; i ++) {
             pStream = pCtx->streams[i];
+
+            if (pStream->no_program) {
+                log_print("[%s:%d]stream %d is no_program\n", __FUNCTION__, __LINE__, i);
+                continue;
+            }
+
             if (pStream->codec->codec_type == CODEC_TYPE_VIDEO) {
                 vinfo = MALLOC(sizeof(mvideo_info_t));
                 MEMSET(vinfo, 0, sizeof(mvideo_info_t));
@@ -204,6 +219,12 @@ static int set_astream_info(play_para_t *p_para)
         AVStream *pStream;
         for (i = 0; i < pCtx->nb_streams; i ++) {
             pStream = pCtx->streams[i];
+
+            if (pStream->no_program) {
+                log_print("[%s:%d]stream %d is no_program\n", __FUNCTION__, __LINE__, i);
+                continue;
+            }
+            
             if (pStream->codec->codec_type == CODEC_TYPE_AUDIO) {
                 for (j = 0; j < p_para->media_info.stream_info.total_audio_num; j ++) {
                     if (p_para->media_info.audio_info[j]) {
@@ -267,6 +288,12 @@ static int set_sstream_info(play_para_t *p_para)
         AVStream *pStream;
         for (i = 0; i < pCtx->nb_streams; i ++) {
             pStream = pCtx->streams[i];
+
+            if (pStream->no_program) {
+                log_print("[%s:%d]stream %d is no_program\n", __FUNCTION__, __LINE__, i);
+                continue;
+            }
+            
             if (pStream->codec->codec_type == CODEC_TYPE_SUBTITLE) {
                 AVMetadataTag *lang = av_metadata_get(pStream->metadata, "language", NULL, 0);
                 sinfo = MALLOC(sizeof(msub_info_t));
@@ -290,42 +317,6 @@ static int set_sstream_info(play_para_t *p_para)
             }
         }
     }
-    return 0;
-}
-
-static int set_chapter_info(play_para_t *p_para)
-{
-    mstream_info_t *info = &p_para->media_info.stream_info;
-    mchapter_info_t *cinfo;
-    AVFormatContext *pCtx = p_para->pFormatCtx;
-    if (!info || !pCtx) {
-        return -1;
-    }
-
-    unsigned int i;
-    int snum = 0;
-    info->total_chapter_num   = (pCtx->nb_chapters > MAX_CHAPTERS) ? MAX_CHAPTERS : pCtx->nb_chapters;
-
-    for (i = 0; i < info->total_chapter_num; i ++) {
-
-      AVChapter *chapter = pCtx->chapters[i];
-      if(!chapter)
-        continue;
-
-      cinfo = MALLOC(sizeof(mchapter_info_t));
-      MEMSET(cinfo, 0, sizeof(mchapter_info_t));
-
-      cinfo->seekto_ms = chapter->start / AV_TIME_BASE;
-
-      AVMetadataTag *tag = av_metadata_get(pCtx->chapters[i]->metadata,"title", NULL, 0);
-      if(tag) {
-        cinfo->name = tag->value;
-      }
-      p_para->media_info.chapter_info[snum] = cinfo;
-      snum++;
-    }
-    info->total_chapter_num = snum;
-
     return 0;
 }
 
@@ -354,12 +345,7 @@ int set_media_info(play_para_t *p_para)
     if (ret < 0) {
         log_error("[set_media_info]set_sstream_info failed ret=%d!\n", ret);
     }
-	
-    ret = set_chapter_info(p_para);
-    if (ret < 0) {
-        log_error("[set_media_info]set_chapter_info failed ret=%d!\n", ret);
-    }
-	
+
     return 0;
 }
 
@@ -482,8 +468,9 @@ static unsigned int handle_current_time(play_para_t *para, unsigned int scr, uns
         return 0;
     }
     if (!para->playctrl_info.pts_valid) {
-        // The valid pts should be in range of total time duration
-        if (scr > 0 && abs(scr - pts) <= (para->state.full_time * PTS_FREQ)) { //in tsync_avevent, pts as u32
+        // when diff(pcr, apts/vpts)<1s, think as pcr valid and can used for 
+        // updating current time 
+        if (scr > 0 && abs(scr - pts) <= PTS_FREQ) { //in tsync_avevent, pts as u32
             para->playctrl_info.pts_valid = 1;
             log_print("[%s:%d]scr=0x%x pts=0x%x diff=0x%x \n", __FUNCTION__, __LINE__, scr, pts, (scr - pts));
         }
@@ -567,8 +554,29 @@ unsigned int get_pts_video(play_para_t *p_para)
 #endif
     return value;
 }
+unsigned int get_scr_state(play_para_t *p_para, unsigned long *time)
+{
+    int handle;
+    int size;
+    char s[16];
+    unsigned int value = 0;
+    codec_para_t *pcodec;
 
-static unsigned int get_pts_audio(play_para_t *p_para)
+    if (p_para->codec) {
+        pcodec = p_para->codec;
+    } else if (p_para->vcodec) {
+        pcodec = p_para->vcodec;
+    } else {
+        log_print("[%s]No codec handler\n", __FUNCTION__);
+        return -1;
+    }
+
+    value = codec_get_scrstate(pcodec, time);
+
+    return value;
+}
+
+unsigned int get_pts_audio(play_para_t *p_para)
 {
     int handle;
     int size;
@@ -639,9 +647,20 @@ static unsigned int is_chapter_discontinue(play_para_t *p_para)
     char *extensions[4] = {"vob", "VOB", "iso", "ISO"};
     int i = 0;
     if (p_para->pFormatCtx && p_para->pFormatCtx->pb &&
-        url_support_time_seek(p_para->pFormatCtx->pb)) {
+        url_is_segment_media(p_para->pFormatCtx->pb)) {
         return 1;
     }
+    if(!strncmp(p_para->pFormatCtx->iformat->name, "cmf", 3)) {
+        return 1;
+    }
+#if 0
+	/*
+	* Lujian.Hu 2013-01-04
+	* for vob file, after seek the first check in pts is 0(so as to other format which is demuxed using the hardware), 
+	* which could leading to video discontinue in vpts_expire(video.c) function, in get_current_time the 
+	* discontinue_point is added to the ctime, so the display time is two times the correct time. after comment the 
+	* following can avoid the error.
+	*/
     for (i = 0; i < 4; i ++) {
         //log_print("[%s]file_name=%s ext=%s\n", __FUNCTION__, p_para->file_name, extensions[i]);
 
@@ -650,6 +669,7 @@ static unsigned int is_chapter_discontinue(play_para_t *p_para)
             return 1;
         }
     }
+#endif
     return 0;
 }
 
@@ -659,8 +679,12 @@ static unsigned int get_current_time(play_para_t *p_para)
     unsigned int ctime = 0;
     int set_discontinue = 0;
     int audio_pts_discontinue = 0, video_pts_discontinue = 0;
+	unsigned long video_pts_discontinue_diff = 0;
+	unsigned long audio_pts_discontinue_diff = 0;
     codec_para_t *codec = NULL;
-
+    int use_apts_as_time = 0;
+    int time_adjust_flag = 0;
+    
     if (p_para->vstream_info.has_video) {
         if (p_para->vcodec) {
             codec = p_para->vcodec;
@@ -671,26 +695,44 @@ static unsigned int get_current_time(play_para_t *p_para)
     if (codec) {
         audio_pts_discontinue = codec_get_sync_audio_discont(codec);
         video_pts_discontinue = codec_get_sync_video_discont(codec);
+		audio_pts_discontinue_diff = codec_get_sync_audio_discont_diff(codec);
+		video_pts_discontinue_diff = codec_get_sync_video_discont_diff(codec);
     }
-
     if (video_pts_discontinue > 0) {
-        log_info("video pts discontinue!!!\n");
-        if (!set_discontinue && is_chapter_discontinue(p_para)) {
-            p_para->discontinue_point = p_para->state.current_time;
-            set_discontinue = 1;
-            p_para->discontinue_flag = 0;
-            log_info("vpts discontinue, point=%d\n", p_para->discontinue_point);
+	//log_info("video pts discontinue!, adiff=%lu,vdiff=%lu,\n",audio_pts_discontinue_diff,video_pts_discontinue_diff);		
+        if (p_para->astream_info.has_audio) {
+	    use_apts_as_time = 1;
+            if (check_time_interrupt(&p_para->playctrl_info.pts_discontinue_check_time, video_pts_discontinue_diff)){
+                time_adjust_flag = 1;
+                use_apts_as_time = 0;
+            }
         }
-        if (codec) {
-            codec_set_sync_video_discont(codec, 0);
+        else {
+            time_adjust_flag = 1;
         }
-        log_info("vpts discontinue, vpts=0x%x scr=0x%x apts=0x%x\n", get_pts_video(p_para), get_pts_pcrscr(p_para), get_pts_audio(p_para));
+        if (time_adjust_flag == 1){
+            if(!set_discontinue && is_chapter_discontinue(p_para))
+    	    {
+                p_para->discontinue_point = p_para->state.current_time;
+                set_discontinue = 1;
+                p_para->discontinue_flag = 0;
+                log_info("vpts discontinue, point=%d\n", p_para->discontinue_point);
+            }
+            if (codec) {
+                codec_set_sync_video_discont(codec, 0);
+    		codec_set_sync_video_discont_diff(codec, 0);
+            }           
+        }        
+        log_info("vpts discontinue, vpts=0x%x scr=0x%x apts=0x%x vdiff=%lu\n", 
+                    get_pts_video(p_para), get_pts_pcrscr(p_para), get_pts_audio(p_para),video_pts_discontinue_diff);
     }
 
     if (audio_pts_discontinue > 0) {
-        log_info("audio pts discontinue, curtime=%d lasttime=%d\n", p_para->state.current_time, p_para->state.last_time);
-        if (!set_discontinue && is_chapter_discontinue(p_para) &&
-            (p_para->state.current_time < p_para->state.last_time)) {
+        //log_info("audio pts discontinue, curtime=%d lasttime=%d\n", p_para->state.current_time, p_para->state.last_time);
+        use_apts_as_time = 0;
+        if (!set_discontinue && is_chapter_discontinue(p_para) /*&&
+			(p_para->state.current_time < p_para->state.last_time)*/)
+		{
             p_para->discontinue_point = p_para->state.current_time;
             set_discontinue = 1;
             p_para->discontinue_flag = 0;
@@ -698,15 +740,21 @@ static unsigned int get_current_time(play_para_t *p_para)
         }
         if (codec) {
             codec_set_sync_audio_discont(codec, 0);
+			codec_set_sync_audio_discont_diff(codec, 0);
         }
-        log_info("apts discontinue, vpts=0x%x scr=0x%x apts=0x%x\n", get_pts_video(p_para), get_pts_pcrscr(p_para), get_pts_audio(p_para));
+        log_info("apts discontinue, vpts=0x%x scr=0x%x apts=0x%x adiff=%lu\n", 
+                    get_pts_video(p_para), get_pts_pcrscr(p_para), get_pts_audio(p_para),audio_pts_discontinue_diff);
     }
 
     if (p_para->vstream_info.has_video && p_para->astream_info.has_audio) {
         pcr_scr = get_pts_pcrscr(p_para);
         apts = get_pts_audio(p_para);
         vpts = get_pts_video(p_para);
-        ctime = handle_current_time(p_para, pcr_scr, apts);
+        if(p_para->playctrl_info.pts_valid && use_apts_as_time == 1) {
+            ctime = apts;
+        } else {
+            ctime = handle_current_time(p_para, pcr_scr, apts);        
+        }
         log_debug("***[get_current_time:%d]ctime=0x%x\n", __LINE__, ctime);
     } else if (p_para->astream_info.has_audio)/* &&
             (p_para->stream_type == STREAM_ES) &&
@@ -721,6 +769,7 @@ static unsigned int get_current_time(play_para_t *p_para)
         log_debug("[get_current_time] curtime=0x%x pcr=0x%x apts=0x%x vpts=0x%x\n", ctime, pcr_scr, apts, vpts);
     }
     log_debug("===[get_current_time] curtime=0x%x(%d) pcr=0x%x apts=0x%x vpts=0x%x\n", ctime, ctime / PTS_FREQ, pcr_scr, apts, vpts);
+    p_para->state.current_pts = pcr_scr;	
     return ctime;
 }
 
@@ -743,12 +792,11 @@ static void update_current_time(play_para_t *p_para)
 #endif
         } else  if (!p_para->playctrl_info.end_flag) {
             time = get_current_time(p_para);
-            p_para->state.current_pts = time;
             if (p_para->state.start_time == -1) {
-                if (p_para->astream_info.start_time != -1) {
-                    p_para->state.start_time = p_para->astream_info.start_time;
-                } else if (p_para->vstream_info.start_time != -1) {
+                if (p_para->vstream_info.start_time != -1) {
                     p_para->state.start_time = p_para->vstream_info.start_time;
+                } else if (p_para->astream_info.start_time != -1) {
+                    p_para->state.start_time = p_para->astream_info.start_time;
                 }
             }
             log_debug("[update_current_time]time=%d astart_time=%d  vstart_time=%d last_time=%d\n", time / PTS_FREQ, ((unsigned int)p_para->astream_info.start_time / PTS_FREQ), ((unsigned int)p_para->vstream_info.start_time / PTS_FREQ), p_para->state.last_time);
@@ -767,7 +815,7 @@ static void update_current_time(play_para_t *p_para)
                 }
             }
             if ((unsigned int)time > 0 && (unsigned int)p_para->state.start_time > 0) {
-                if ((unsigned int)p_para->state.start_time < (unsigned int)time) {
+                if ((unsigned int)p_para->state.start_time <= (unsigned int)time) {
                     log_debug("[update_current_time:%d]time=0x%x start_time=0x%x\n", __LINE__, time, p_para->state.start_time);
                     time -= p_para->state.start_time;
                     log_debug("[update_current_time:%d]time=0x%x (%d)\n", __LINE__, time, time / PTS_FREQ);
@@ -775,7 +823,7 @@ static void update_current_time(play_para_t *p_para)
             }
             log_debug("[update_current_time:%d]time=%d discontinue=%d\n", __LINE__, time / PTS_FREQ, p_para->discontinue_point);
             if (p_para->discontinue_point != 0) {
-                log_print("[update_current_time:%d]time=%d dpoint=%d  p_para->discontinue_flag=%d\n", __LINE__, time / PTS_FREQ,
+                log_debug("[update_current_time:%d]time=%d dpoint=%d  p_para->discontinue_flag=%d\n", __LINE__, time / PTS_FREQ,
                           p_para->discontinue_point, p_para->discontinue_flag);
                 if (p_para->pFormatCtx && p_para->pFormatCtx->pb &&
                     url_support_time_seek(p_para->pFormatCtx->pb) &&
@@ -783,8 +831,19 @@ static void update_current_time(play_para_t *p_para)
                     p_para->discontinue_point = p_para->discontinue_point - time / PTS_FREQ;
                     log_print("[update_current_time:%d]time<dpoint dpoint=%d\n", __LINE__, p_para->discontinue_point);
                     p_para->discontinue_flag = 1;
+                    p_para->discontinue_time = 0;
                 }
+                unsigned int tmp_time = time;
                 time += p_para->discontinue_point * PTS_FREQ;
+                if (((int)(time/PTS_FREQ) > p_para->state.full_time) && (p_para->state.full_time > 0)) {
+                    if(p_para->discontinue_time > 0) {
+                        p_para->discontinue_point += (tmp_time - p_para->discontinue_time) / PTS_FREQ;
+                        time = p_para->discontinue_point * PTS_FREQ;
+                    } else {
+                        time = p_para->discontinue_point * PTS_FREQ;
+                    }
+                    p_para->discontinue_time = tmp_time;
+                }
             }
             log_debug("[update_current_time]time=%d curtime=%d lasttime=%d\n", time / PTS_FREQ, p_para->state.current_time, p_para->state.last_time);
             p_para->state.current_ms = time / PTS_FREQ_MS;
@@ -846,35 +905,44 @@ static void check_avbuf_end(play_para_t *p_para, struct buf_status *vbuf, struct
     int vlimit = 0;
 
     if (p_para->vstream_info.has_video) {
-        if ((p_para->vstream_info.video_format == VFORMAT_MPEG4) &&
-            (p_para->vstream_info.video_codec_type == VIDEO_DEC_FORMAT_H263)) {
-            vlimit = RESERVE_VIDEO_SIZE << 2;
-        } else if (p_para->vstream_info.video_format == VFORMAT_MJPEG) {
-            vlimit = RESERVE_VIDEO_SIZE >> 2;
-        } else {
-            vlimit = RESERVE_VIDEO_SIZE;
-        }
-        if (vbuf->data_len < vlimit) {
-            log_print("[%s:%d]vbuf=0x%x	(limit=0x%x) video_low_buffer\n", __FUNCTION__, __LINE__, vbuf->data_len, vlimit);
-            p_para->playctrl_info.video_low_buffer = 1;
+        if (!p_para->playctrl_info.video_low_buffer ) {
+            if ((p_para->vstream_info.video_format == VFORMAT_MPEG4) &&
+                (p_para->vstream_info.video_codec_type == VIDEO_DEC_FORMAT_H263)) {
+                vlimit = RESERVE_VIDEO_SIZE << 2;
+            } else if (p_para->vstream_info.video_format == VFORMAT_MJPEG) {
+                vlimit = RESERVE_VIDEO_SIZE >> 2;
+            } else {
+                vlimit = RESERVE_VIDEO_SIZE;
+            }
+            if (vbuf->data_len < vlimit) {
+                log_print("[%s:%d]vbuf=0x%x	(limit=0x%x) video_low_buffer\n", __FUNCTION__, __LINE__, vbuf->data_len, vlimit);
+                p_para->playctrl_info.video_low_buffer = 1;
+            }
         }
     } else {
         p_para->playctrl_info.video_end_flag = 1;
+        p_para->playctrl_info.video_low_buffer = 1;
     }
 
-    if ((p_para->astream_info.has_audio && abuf->data_len < RESERVE_AUDIO_SIZE) ||
-        (!p_para->astream_info.has_audio)) {
-        if (p_para->astream_info.has_audio) {
-            log_print("[%s:%d]abuf=0x%x	(limit=0x%x) audio_low_buffer\n", __FUNCTION__, __LINE__, abuf->data_len, RESERVE_AUDIO_SIZE);
+    if (p_para->astream_info.has_audio) {
+        if(!p_para->playctrl_info.audio_low_buffer) {
+            if(abuf->data_len < RESERVE_AUDIO_SIZE) {        
+                log_print("[%s:%d]abuf=0x%x	(limit=0x%x) audio_low_buffer\n", __FUNCTION__, __LINE__, abuf->data_len, RESERVE_AUDIO_SIZE);
+                p_para->playctrl_info.audio_low_buffer = 1;
+            } else if (p_para->astream_info.audio_format == AFORMAT_WMAPRO) {
+                int frame_size = p_para->pFormatCtx->streams[p_para->astream_info.audio_index]->codec->block_align;
+                if (abuf->data_len < frame_size) {
+                    p_para->playctrl_info.audio_low_buffer = 1;
+                    log_print("[%s:%d]wmapro audio audio low buffer\n", __FUNCTION__, __LINE__);
+                }
+            }
         }
+    } else{
+        p_para->playctrl_info.audio_end_flag = 1;
         p_para->playctrl_info.audio_low_buffer = 1;
-    } else if (p_para->astream_info.has_audio && p_para->astream_info.audio_format == AFORMAT_WMAPRO) {
-        int frame_size = p_para->pFormatCtx->streams[p_para->astream_info.audio_index]->codec->block_align;
-        if (abuf->data_len < frame_size) {
-            p_para->playctrl_info.audio_low_buffer = 1;
-        }
     }
-    //log_print("[%s:%d]abuf=0x%x   vbuf=0x%x\n", __FUNCTION__, __LINE__, abuf->data_len, abuf->data_len);
+    //log_print("[%s:%d]abuf=0x%x   vbuf=0x%x vlow=%d alow=%d\n", __FUNCTION__, __LINE__, \
+     //abuf->data_len, vbuf->data_len,p_para->playctrl_info.video_low_buffer,p_para->playctrl_info.audio_low_buffer);
 
     if ((p_para->playctrl_info.video_low_buffer ||
          p_para->playctrl_info.audio_low_buffer) &&
@@ -908,35 +976,55 @@ static void check_avbuf_end(play_para_t *p_para, struct buf_status *vbuf, struct
 
 static void check_force_end(play_para_t *p_para, struct buf_status *vbuf, struct buf_status *abuf)
 {
-    int check_flag = 0;
-    //log_print("[%s]vlevel=%.03f alevel=%.03f count=%d\n", __FUNCTION__, p_para->state.video_bufferlevel,p_para->state.audio_bufferlevel, p_para->check_end.end_count);
-    //if (check_time_interrupt(&p_para->check_end.old_time_ms, p_para->check_end.interval)) {
-    if (!p_para->playctrl_info.end_flag && (
-            (p_para->vstream_info.has_video && (p_para->state.video_bufferlevel < 0.04)) ||
-            (p_para->astream_info.has_audio && (p_para->state.audio_bufferlevel < 0.04)) ||
-            (p_para->astream_info.has_audio && p_para->astream_info.audio_format == AFORMAT_WMAPRO && abuf->data_len < p_para->pFormatCtx->streams[p_para->astream_info.audio_index]->codec->block_align)
-        )) {
+    int check_flag = 0;    
+    int result = 0;
+    int has_video = p_para->vstream_info.has_video;
+    int has_audio = p_para->astream_info.has_audio;   
+    int aidx = p_para->astream_info.audio_index;   
+    float vbuf_level = p_para->state.video_bufferlevel;
+    float abuf_level = p_para->state.audio_bufferlevel;
+    aformat_t audio_fmt = p_para->astream_info.audio_format;
+    AVStream *astream = p_para->astream_info.has_audio?p_para->pFormatCtx->streams[aidx]:NULL;
+    int abuf_datalen= abuf->data_len;    
+
+    if(has_video)
+        result = vbuf_level < 0.04;
+    else
+        result = 1;
+    if(has_audio)
+        result = result && (abuf_level < 0.04);
+   //log_print("[%s:%d]result=%d abuf_level=%f\n", __FUNCTION__, __LINE__, result,abuf_level);
+    if(has_audio && audio_fmt == AFORMAT_WMAPRO)
+        result = result && (abuf_datalen < astream->codec->block_align);    
+    //log_print("[%s:%d]end=%d result=%d afmt=%d\n", __FUNCTION__, __LINE__, p_para->playctrl_info.end_flag, result, audio_fmt);
+    if (!p_para->playctrl_info.end_flag && result) {
         //log_print("v:%d vlen=0x%x a:%d alen=0x%x count=%d, vrp 0x%x, arp 0x%x\n",
         //    p_para->vstream_info.has_video,vbuf->data_len, p_para->astream_info.has_audio,abuf->data_len,p_para->check_end.end_count,vbuf->read_pointer,abuf->read_pointer);
-        if (p_para->vstream_info.has_video) {
+        if (has_video) {
             if (p_para->vbuffer.rp_is_changed) {
                 p_para->check_end.end_count = CHECK_END_COUNT;
-            } else {
+            } else {    //video buffer rp not move
                 check_flag = 1;
-                log_print("[%s]vrp not move,vrp=vbufrp=0x%x,vlevel=%.03f cnt=%d\n", __FUNCTION__, vbuf->read_pointer, p_para->state.video_bufferlevel, p_para->check_end.end_count);
+                log_print("[%s]vrp not move,vrp=vbufrp=0x%x,vlevel=%.03f cnt=%d\n", __FUNCTION__, vbuf->read_pointer, vbuf_level, p_para->check_end.end_count);
             }
         }
-        if (p_para->astream_info.has_audio) {
-            if (p_para->astream_info.audio_format == AFORMAT_AMR || AFORMAT_PCM_S16LE == p_para->astream_info.audio_format || AFORMAT_APE == p_para->astream_info.audio_format || AFORMAT_MPEG == p_para->astream_info.audio_format || AFORMAT_AAC == p_para->astream_info.audio_format)
+        if (has_audio) {
+            if (audio_fmt == AFORMAT_AMR || 
+                audio_fmt ==AFORMAT_PCM_S16LE || 
+                audio_fmt == AFORMAT_APE  ||
+                audio_fmt == AFORMAT_MPEG  || 
+                audio_fmt == AFORMAT_AAC  || 
+                audio_fmt == AFORMAT_FLAC){
                 if (p_para->state.current_time < p_para->state.full_time && check_audio_output()) {
                     p_para->check_end.end_count = CHECK_END_COUNT;
                 }
+            }
             if (p_para->abuffer.rp_is_changed) {
                 p_para->check_end.end_count = CHECK_END_COUNT;
             } else {
                 check_flag = 1;
                 log_print("[%s]arp not move,arp=abufrp=0x%x alevel=%.03f cnt=%d\n", __FUNCTION__, abuf->read_pointer, p_para->state.audio_bufferlevel, p_para->check_end.end_count);
-            }
+            }            
         }
 
         if (check_flag) {
@@ -978,24 +1066,58 @@ static void check_force_end(play_para_t *p_para, struct buf_status *vbuf, struct
     }
 }
 
+static int64_t get_measured_bandwidth(play_para_t *p_para){
+	int64_t value = 0;
+	ffmpeg_geturl_netstream_info(p_para,1,&value);
+	//log_print("Get measured bandwidth: %lld\n",value);
+	return value;
+}
+static int64_t get_playing_bandwidth(play_para_t *p_para){
+	int64_t value = 0;
+	ffmpeg_geturl_netstream_info(p_para,2,&value);
+	//log_print("Get measured bandwidth: %lld\n",value);
+	return value;
+}
 static int  update_buffering_states(play_para_t *p_para,
                                     struct buf_status *vbuf,
                                     struct buf_status *abuf)
 {
     float alevel, vlevel;
     float minlevel, maxlevel;
-
+    float avlevel;
     if (abuf->size > 0) {
         alevel = (float)abuf->data_len / abuf->size;
+	  ffmepg_seturl_codec_buf_info(p_para,2,abuf->size);	
+	  ffmepg_seturl_codec_buf_info(p_para,4,abuf->data_len);
+        alevel =alevel>1?1:alevel;//maybe big than 1,when the limit buf < bufsize.		
     } else {
         alevel = 0;
     }
     if (vbuf->size > 0) {
         vlevel = (float)vbuf->data_len / vbuf->size;
+	 vlevel =vlevel>1?1:vlevel;			
+	  ffmepg_seturl_codec_buf_info(p_para,1,vbuf->size);
+	  ffmepg_seturl_codec_buf_info(p_para,3,vbuf->data_len);
     } else {
         vlevel = 0;
     }
-
+    if (p_para->astream_info.has_audio && p_para->vstream_info.has_video) {
+        minlevel = MIN(alevel, vlevel);
+        maxlevel = MAX(alevel, vlevel);
+    } else if (p_para->astream_info.has_audio) {
+        minlevel = alevel;
+        maxlevel = alevel;
+    } else {
+        minlevel = vlevel;
+        maxlevel = vlevel;
+    }
+    avlevel=minlevel;
+    if(maxlevel>0.8){
+	avlevel+=maxlevel-0.8;
+	avlevel=MIN(avlevel, 1);
+    }
+    ffmpeg_seturl_buffered_level(p_para,(int)(10000*avlevel));
+    
     if (p_para->buffering_enable && p_para->buffering_start_time_s > 0) {
         /*reset  buffering parameters for  frame rate*/
         int bitrate = 0;
@@ -1007,6 +1129,9 @@ static int  update_buffering_states(play_para_t *p_para,
                 bitrate = (p_para->pFormatCtx->file_size * 8) / (p_para->pFormatCtx->duration / AV_TIME_BASE);
             }
         }
+	  if(bitrate<=0){
+		bitrate = get_playing_bandwidth(p_para);
+	  }	
         if (bitrate > 0 && (vbuf->size > 0 || abuf->size > 0)) {
             /*===time * bitrate/8/bufsize=buflevel =====*/
             p_para->buffering_threshhold_middle = ((float)buftime * bitrate / 8) / (vbuf->size + abuf->size); //for tmp start.we will reset after playing
@@ -1034,6 +1159,7 @@ static int  update_buffering_states(play_para_t *p_para,
     if (p_para->pFormatCtx && p_para->pFormatCtx->pb) {
         int buftime = -1;;
         p_para->state.bufed_pos = url_buffed_pos(p_para->pFormatCtx->pb);
+	  p_para->state.download_speed = get_measured_bandwidth(p_para);	
         buftime = (int)url_fbuffered_time(p_para->pFormatCtx->pb);
         if (buftime < 0) {
             buftime = (int)av_buffering_data(p_para->pFormatCtx, -1);
@@ -1063,20 +1189,8 @@ static int  update_buffering_states(play_para_t *p_para,
         }
         p_para->buffering_force_delay_s = 0;
     }
-
     //if (!p_para->playctrl_info.read_end_flag){
     if (p_para->buffering_enable && get_player_state(p_para) != PLAYER_PAUSE) {
-        if (p_para->astream_info.has_audio && p_para->vstream_info.has_video) {
-            minlevel = MIN(alevel, vlevel);
-            maxlevel = MAX(alevel, vlevel);
-        } else if (p_para->astream_info.has_audio) {
-            minlevel = alevel;
-            maxlevel = alevel;
-        } else {
-            minlevel = vlevel;
-            maxlevel = vlevel;
-        }
-
         if ((get_player_state(p_para) == PLAYER_RUNNING) &&
             (minlevel < p_para->buffering_threshhold_min)  &&
             (maxlevel < p_para->buffering_threshhold_max * 3 / 4) &&
@@ -1134,6 +1248,11 @@ static void update_av_sync_for_audio(play_para_t *p_para)
     if (!p_para->abuffer.rp_is_changed && !check_time_interrupt(&p_para->playctrl_info.avsync_check_old_time, 20)) {
         return ;    //no changed and time is no changed.do count---,1S no changesd..20*50
     }
+    if(p_para->playctrl_info.video_low_buffer == 1 || 
+        p_para->playctrl_info.audio_low_buffer == 1) {
+        return;
+    }
+    
     if (p_para->playctrl_info.audio_ready &&
         p_para->vstream_info.has_video &&
         p_para->astream_info.has_audio &&
@@ -1166,6 +1285,72 @@ static void update_av_sync_for_audio(play_para_t *p_para)
     }
 }
 
+static int check_avdiff_time(play_para_t *p_para)
+{
+    int ret;
+    unsigned int vpts = 0, apts = 0;
+    int diff_threshold = 90000 * 8;
+    AVFormatContext *pCtx = p_para->pFormatCtx;
+    int64_t time_point;
+
+    apts = get_pts_audio(p_para);
+    vpts = get_pts_video(p_para);
+
+    if ((((apts > vpts) && (apts - vpts > diff_threshold))
+        || ((apts < vpts) && (vpts - apts > diff_threshold)))
+        && (0 == p_para->playctrl_info.avdiff_next_reset_timepoint)
+        && (get_player_state(p_para) == PLAYER_RUNNING)) {
+        if (0 == p_para->playctrl_info.avdiff_check_old_time) {
+            log_print("[%s:%d]avsync diff started\n");
+            check_time_interrupt(&p_para->playctrl_info.avdiff_check_old_time, 0);
+            return 0;
+        } else {
+            if (check_time_interrupt(&p_para->playctrl_info.avdiff_check_old_time, 60*1000)) {
+                if (pCtx->pb && pCtx->pb->opaque) {
+                    time_point = url_fseekitemtime(pCtx->pb, p_para->state.current_time);
+                    if (-1 == time_point) {
+                        log_print("[%s:%d]avsync diff is -1\n", __FUNCTION__, __LINE__);
+                        if (url_support_time_seek(pCtx->pb)) {
+                            return 0;
+                        } else {
+                            return 1;
+                        }
+                    } else if (p_para->state.full_time == time_point) {
+                        log_print("[%s:%d]avsync diff is the full_time\n", __FUNCTION__, __LINE__);
+                        p_para->playctrl_info.avdiff_check_old_time = 0;
+                        return 0;
+                    } else if (p_para->state.current_time == time_point) {
+                        log_print("[%s:%d]avsync diff is the current_time\n", __FUNCTION__, __LINE__);
+                        return 1;
+                    } else if (p_para->state.current_time > time_point) {
+                        log_print("[%s:%d]avsync diff some error happened\n", __FUNCTION__, __LINE__);
+                        return 1;
+                    } else {
+                        p_para->playctrl_info.avdiff_next_reset_timepoint = time_point;
+                        return 0;
+                    }
+                } else {
+                    log_print("[%s:%d]avsync diff no opaque\n", __FUNCTION__, __LINE__);
+                    return 1;
+                }
+            } else {
+                return 0;
+            }
+        }
+    } else if (p_para->playctrl_info.avdiff_next_reset_timepoint) {
+        if (p_para->state.current_time >= p_para->playctrl_info.avdiff_next_reset_timepoint) {
+            p_para->playctrl_info.avdiff_next_reset_timepoint = 0;
+			log_print("[%s:%d]avsync diff wait time out\n", __FUNCTION__, __LINE__);
+            return 1;
+        } else {
+            return 0;
+        }
+    } else {
+        p_para->playctrl_info.avdiff_check_old_time = 0;
+        return 0;
+    }
+}
+
 int update_playing_info(play_para_t *p_para)
 {
     struct buf_status vbuf, abuf;
@@ -1173,6 +1358,7 @@ int update_playing_info(play_para_t *p_para)
     struct adec_status adec;
     player_status sta;
     int ret;
+    unsigned long systime = 0;
 
     MEMSET(&vbuf, 0, sizeof(struct buf_status));
     MEMSET(&abuf, 0, sizeof(struct buf_status));
@@ -1190,6 +1376,30 @@ int update_playing_info(play_para_t *p_para)
         update_buffering_states(p_para, &vbuf, &abuf);
         update_av_sync_for_audio(p_para);
 
+#if 1
+        /* set pcm resampling for wfd */
+        if (am_getconfig_bool("media.libplayer.wfd") && (p_para->abuffer.data_level > 2048)) {
+            // 2k to try
+            codec_para_t *avcodec = NULL;
+            int resample_enable;
+
+            if (p_para->codec) {
+                avcodec = p_para->codec;
+            } else if (p_para->acodec) {
+                avcodec = p_para->acodec;
+            }
+            if (avcodec) {
+                resample_enable = codec_get_audio_resample_ena(avcodec);
+                if (!resample_enable && (p_para->abuffer.data_level > 2048)) {
+                    codec_set_audio_resample_type(avcodec, 1);  // down resample
+                    codec_set_audio_resample_ena(avcodec, 1);  // enable resample
+                } /*else if (resample_enable && (p_para->abuffer.data_level < 512)) {
+                    codec_set_audio_resample_ena(avcodec, 0);  // disable resample
+                }*/
+            }
+        }
+#endif
+        
         if (sta > PLAYER_INITOK && sta < PLAYER_ERROR) {
             if (p_para->playctrl_info.audio_ready != 1) {
                 p_para->playctrl_info.audio_ready  = codec_audio_isready(p_para->codec);
@@ -1209,10 +1419,21 @@ int update_playing_info(play_para_t *p_para)
                 }
             }
         }
-        if (p_para->playctrl_info.audio_ready == 1 ||
+        if (!p_para->playctrl_info.pcrscr_state &&
+            (p_para->vstream_info.has_video && p_para->astream_info.has_audio)) {
+            if (get_scr_state(p_para, &systime)==TSYNC_ADEC_STARTED) {
+                p_para->playctrl_info.pcrscr_state = 1;
+                log_print("[%s] systime=%x,\n", __FUNCTION__, systime);
+            }
+        } else {
+            p_para->playctrl_info.pcrscr_state = 1;
+        }
+		
+        if (p_para->playctrl_info.pcrscr_state &&
+            (p_para->playctrl_info.audio_ready == 1 ||
             p_para->playctrl_info.search_flag ||
             p_para->playctrl_info.fast_backward ||
-            p_para->playctrl_info.fast_forward) {
+            p_para->playctrl_info.fast_forward)) {
             update_current_time(p_para);
         }
         p_para->state.pts_video = get_pts_video(p_para);
@@ -1297,7 +1518,7 @@ int player_hwbuflevel_update(play_para_t *player)
     hwbufstats_t hwbufs;
 
     sta = get_player_state(player);
-    if (sta < PLAYER_INITOK || sta == PLAYER_SEARCHING || sta >= PLAYER_ERROR) {
+    if (sta < PLAYER_INITOK  || sta >= PLAYER_ERROR) {
         return 0;
     }
     MEMSET(&vbuf, 0, sizeof(struct buf_status));
@@ -1320,5 +1541,27 @@ int player_hwbuflevel_update(play_para_t *player)
         }
     }
     return 0;
+}
+
+void check_avdiff_status(play_para_t *p_para)
+{
+    if (p_para->playctrl_info.audio_ready == 1 
+        && (!p_para->playctrl_info.search_flag)
+        && (!p_para->playctrl_info.fast_backward)
+        && (!p_para->playctrl_info.fast_forward)
+        && p_para->astream_info.has_audio
+        && p_para->vstream_info.has_video
+        && get_tsync_enable()) {
+        if (check_avdiff_time(p_para) 
+            && (p_para->state.current_time < p_para->state.full_time - 1)) {
+            p_para->playctrl_info.time_point = p_para->state.current_time + 1;
+            p_para->playctrl_info.reset_flag = 1;
+            set_black_policy(0);
+            p_para->playctrl_info.end_flag = 1;
+            log_print("[%s:%d]AV diff is too long, need reset\n", __FUNCTION__, __LINE__);
+        }
+    }
+
+    return;
 }
 

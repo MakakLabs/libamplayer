@@ -21,6 +21,7 @@
 #include <audio-dec.h>
 #include <audiodsp.h>
 #include <log-print.h>
+#include <cutils/properties.h>
 
 firmware_s_t firmware_list[] = {
     {0, MCODEC_FMT_MPEG123, "audiodsp_codec_mad.bin"},
@@ -108,6 +109,7 @@ static int switch_audiodsp(adec_audio_format_t fmt)
     case ADEC_AUDIO_FORMAT_PCM_S16LE:
     case ADEC_AUDIO_FORMAT_PCM_U8:
     case ADEC_AUDIO_AFORMAT_PCM_BLURAY:
+    case ADEC_AUDIO_FORMAT_PCM_WIFIDISPLAY:
         return MCODEC_FMT_PCM;
 
     case ADEC_AUDIO_FORMAT_WMA:
@@ -149,6 +151,7 @@ static firmware_s_t * find_firmware_by_fmt(int m_fmt)
     return NULL;
 }
 
+
 /**
  * \brief init audiodsp
  * \param dsp_ops pointer to dsp operation struct
@@ -172,7 +175,6 @@ int audiodsp_init(dsp_operations_t *dsp_ops)
         adec_print("unable to open audio dsp  %s,err: %s", DSP_DEV_NOD, strerror(errno));
         return -1;
     }
-
     ioctl(fd, AUDIODSP_UNREGISTER_ALLFIRMWARE, 0);
     for (i = 0; i < num; i++) {
         f = &firmware_list[i];
@@ -212,6 +214,12 @@ int audiodsp_start(aml_audio_dec_t *audec)
         return -1;
     }
 
+    if (am_getconfig_bool("media.libplayer.wfd")) {
+        ioctl(dsp_ops->dsp_file_fd, AUDIODSP_SET_PCM_BUF_SIZE, 16*1024);
+    } else {
+        ioctl(dsp_ops->dsp_file_fd, AUDIODSP_SET_PCM_BUF_SIZE, 32*1024);
+    }
+    
     m_fmt = switch_audiodsp(audec->format);
     adec_print("[%s:%d]  audio_fmt=%d\n", __FUNCTION__, __LINE__, m_fmt);
 
@@ -226,8 +234,10 @@ int audiodsp_start(aml_audio_dec_t *audec)
         return -3;
     }
 
-    if(audec->need_stop) //in case  stop command comes now  
-       return -5;
+    if(audec->need_stop){ //in case  stop command comes now  
+        ioctl(dsp_ops->dsp_file_fd, AUDIODSP_STOP, 0);
+        return -5;
+    }
 
     ret = ioctl(dsp_ops->dsp_file_fd, AUDIODSP_DECODE_START, 0);
     err_count = 0;

@@ -44,12 +44,12 @@ do { \
 #define VB_SIZE             (0x100000)
 #define AB_SIZE             (0x60000)
 #define MAX_BURST_WRITE     (VB_SIZE/32)
-#define MAX_RAW_DATA_SIZE   (0x20000)       //128k
+#define MAX_RAW_DATA_SIZE   (0x20000)       //128K <= fetch buffer
 #define MIN_RAW_DATA_SIZE   (0x1000)        //4k
 #define RESERVE_VIDEO_SIZE  (256)
 #define RESERVE_AUDIO_SIZE  (64)
 #define MAX_PACKET_SIZE     (4*1024*1024)
-#define FILE_BUFFER_SIZE    (1024*32)//(1024*512)   
+#define FILE_BUFFER_SIZE    (512)//(1024*512)   
 #define CHECK_END_COUNT     (40)
 #define CHECK_AUDIO_HALT_CNT (50)
 #define CHECK_VIDEO_HALT_CNT (20)
@@ -82,6 +82,11 @@ do { \
 
 #define SUBTITLE_SYNC_HIGH  0x414d4c55
 #define SUBTITLE_SYNC_LOW   0xaa000000
+
+
+#define BREAK_FLAG      0x01
+#define CONTINUE_FLAG   0x02
+#define NONO_FLAG       0x00
 
 //#define DEBUG_VARIABLE_DUR
 
@@ -137,6 +142,7 @@ typedef struct play_para {
     int             first_index;
     int             max_raw_size;
     int    discontinue_point;     
+    unsigned int    discontinue_time;
     unsigned int    discontinue_flag;
     unsigned int    karaok_flag;
     check_end_info_t check_end;
@@ -195,6 +201,7 @@ typedef struct play_para {
 
 	void *player_mate;/*player's mate thread handle*/
 	vdec_profile_t vdec_profile;
+	char off_init;
 } play_para_t;
 
 typedef struct media_type_t {
@@ -231,5 +238,6 @@ void *player_mate_init(play_para_t *player,int intervals);
 int player_mate_wake(play_para_t *player,int delay);
 int player_mate_sleep(play_para_t *player);
 int player_mate_release(play_para_t *player);
-
+void check_msg(play_para_t *para, player_cmd_t *msg);
+int nextcmd_is_cmd(play_para_t *player, ctrl_cmd_t c_cmd);
 #endif

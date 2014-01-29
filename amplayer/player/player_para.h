@@ -39,7 +39,6 @@ typedef struct {
     unsigned int    video_rotation_degree;
     unsigned int    video_codec_rate;
     vdec_type_t     video_codec_type;
-    int             vdec_buf_len;
     int             extradata_size;
     uint8_t             *extradata;
 } v_stream_info_t;
@@ -54,7 +53,6 @@ typedef struct {
     int             audio_samplerate;
     int             check_first_pts;
     int64_t         start_time;
-    int             adec_buf_len;
     float           audio_duration;
     int             extradata_size;
     uint8_t         *extradata;
@@ -106,7 +104,9 @@ typedef  struct {
     unsigned int switch_audio_id;
     unsigned int switch_sub_id;
     unsigned int is_playlist;	
-    unsigned int lowbuffermode_flag;	
+    unsigned int lowbuffermode_flag;
+    unsigned int ignore_ffmpeg_errors;
+    unsigned int temp_interrupt_ffmpeg;	
     float time_point;
     int f_step;
     int read_max_retry_cnt;
@@ -119,6 +119,18 @@ typedef  struct {
 	int seek_frame_fail;
     long avsync_check_old_time;
     long vbuf_rpchanged_Old_time;
+    long avdiff_check_old_time;
+    int avdiff_next_reset_timepoint;
+    int pts_discontinue_check_time;
+
+	int buf_limited_time_ms;/*low buffering mode,if data> ms,we do wait write.*/
+	int reset_drop_buffered_data;/*droped buffered data.*/
+
+    int iponly_flag;
+    int freerun_mode;
+    int no_dec_ref_buf;
+    int vsync_upint;
+    int pcrscr_state;
 } p_ctrl_info_t;
 
 int player_dec_init(struct play_para *p_para);

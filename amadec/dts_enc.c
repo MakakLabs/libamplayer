@@ -7,6 +7,7 @@
 #include <pthread.h>
 #include "dts_enc.h"
 #include "dts_transenc_api.h"
+#include <cutils/properties.h>
 typedef enum {
     IDLE,
     TERMINATED,
@@ -72,11 +73,22 @@ static int get_dts_format(void)
         close(fd);
         return 1;
     }
+    close(fd);
     return 0;
 }
 
+static int get_cpu_type(void)
+{
+    char value[PROPERTY_VALUE_MAX];
+    int ret = property_get("ro.board.platform",value,NULL);
+    adec_print("ro.board.platform = %s\n", value);
+    if (ret>0 && match_types("meson6",value))
+    	return 1;
+    return 0;
+}
 int dtsenc_init()
 {
+    return 0;
     int ret;
     memset(&dtsenc_info,0,sizeof(dtsenc_info_t));
     dtsenc_info.dts_flag = get_dts_format();
@@ -86,6 +98,9 @@ int dtsenc_init()
     //dtsenc_info.raw_mode=1;//default open
     if(!dtsenc_info.raw_mode)
         return -1;
+    if(!get_cpu_type()) //if cpu !=m6 ,skip
+        return -1;
+    
    //adec_print("====dts_flag:%d raw_mode:%d \n",dtsenc_info.dts_flag,dtsenc_info.raw_mode);
     
     ret=dts_transenc_init();
@@ -102,12 +117,14 @@ int dtsenc_init()
            dtsenc_release();
            return -1;
        }
+	pthread_setname_np(tid,"AmadecDtsEncLP");	
        dtsenc_info.thread_pid = tid;
     adec_print("====dts_enc init success \n");
     return 0;
 }
 int dtsenc_start()
 {
+    return 0;
     int ret;
     if(dtsenc_info.state!=INITTED)
            return -1;
@@ -117,18 +134,21 @@ int dtsenc_start()
 }
 int dtsenc_pause()
 {
+    return 0;
     if(dtsenc_info.state==ACTIVE)
         dtsenc_info.state=PAUSED;
     return 0;
 }
 int dtsenc_resume()
 {
+    return 0;
     if(dtsenc_info.state==PAUSED)
         dtsenc_info.state=ACTIVE;
     return 0;
 }
 int dtsenc_stop()
 {
+    return 0;
     if(dtsenc_info.state<INITTED)
            return -1;
     dtsenc_info.state=STOPPED;
@@ -145,6 +165,7 @@ int dtsenc_stop()
 }
 int dtsenc_release()
 {
+    return 0;
     memset(&dtsenc_info,0,sizeof(dtsenc_info_t));
     // dtsenc_info.state=TERMINATED;
      adec_print("====dts_enc release ok\n");
@@ -153,6 +174,7 @@ int dtsenc_release()
 
 static void *dts_enc_loop()
 {
+    return 0;
     int ret;
     while(1)
     {
