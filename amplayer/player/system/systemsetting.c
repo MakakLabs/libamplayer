@@ -4,8 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <log_print.h>
-#include <codec_type.h>
-#include <libavcodec/avcodec.h>
 #include "systemsetting.h"
 
 int PlayerSettingIsEnable(const char* path)
@@ -46,7 +44,7 @@ float PlayerGetSettingfloat(const char* path)
 #define FILTER_VFMT_AVS		(1 << 7)
 #define FILTER_VFMT_SW		(1 << 8)
 
-int PlayerGetVFilterFormat(unsigned int codec_id)
+int PlayerGetVFilterFormat()
 {
 	char value[1024];
 	int filter_fmt = 0;
@@ -79,19 +77,6 @@ int PlayerGetVFilterFormat(unsigned int codec_id)
 		} 
 		if (strstr(value,"SW") != NULL || strstr(value,"sw") != NULL) {
 			filter_fmt |= FILTER_VFMT_SW;
-		}
-		/*filter by codec id*/
-		if (strstr(value,"DIVX3") != NULL || strstr(value,"divx3") != NULL){
-			if (codec_id == CODEC_TAG_DIV3)
-				filter_fmt |= FILTER_VFMT_MPEG4;
-		}
-		if (strstr(value,"DIVX4") != NULL || strstr(value,"divx4") != NULL){
-			if (codec_id == CODEC_TAG_DIV4)
-				filter_fmt |= FILTER_VFMT_MPEG4;
-		}
-		if (strstr(value,"DIVX5") != NULL || strstr(value,"divx5") != NULL){
-			if (codec_id == CODEC_TAG_DIV5)
-				filter_fmt |= FILTER_VFMT_MPEG4;
 		}
     }
 	log_print("[%s:%d]filter_vfmt=%x\n", __FUNCTION__, __LINE__, filter_fmt);

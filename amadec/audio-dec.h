@@ -58,6 +58,7 @@ struct aml_audio_dec {
     int avsync_threshold;
     float volume; //left or main volume
     float volume_ext; //right	
+    int audio_delay;
     //codec_para_t *pcodec;
     hw_command_t soundtrack;
     audio_out_operations_t aout_ops;
@@ -69,8 +70,6 @@ struct aml_audio_dec {
 	int SessionID;
 	int format_changed_flag;
 	unsigned dspdec_not_supported;//check some profile that audiodsp decoder can not support,we switch to arm decoder	
-	int droppcm_flag;				// drop pcm flag, if switch audio (1)
-	int no_first_apts;				// if can't get the first apts (1), default (0)
 };
 
 //from amcodec
@@ -83,7 +82,6 @@ typedef struct {
     char extradata[AUDIO_EXTRA_DATA_SIZE];
 	int SessionID;
 	int dspdec_not_supported;//check some profile that audiodsp decoder can not support,we switch to arm decoder	
-	int droppcm_flag;				// drop pcm flag, if switch audio (1)
 } arm_audio_info;
 //status check
 struct adec_status {

@@ -9,6 +9,7 @@
 extern "C" {
 #endif
 
+#ifdef ANDROID
     int am_config_init(void);
     int am_getconfig(const char * path, char *val, const char * def);
     int am_setconfig(const char * path, const char *val);
@@ -16,8 +17,16 @@ extern "C" {
     int am_getconfig_float(const char * path, float *value);
     int am_dumpallconfigs(void);
     int am_getconfig_bool(const char * path);
-    int am_getconfig_bool_def(const char * path,int def);
-    float am_getconfig_float_def(const char * path,float defvalue);
+#else
+    static inline int am_config_init(void) { return 0; };
+    static inline int am_getconfig(const char * path, char *val, const char * def) { return -1; };
+    static inline int am_setconfig(const char * path, const char *val) { return -1; };
+    static inline int am_setconfig_float(const char * path, float value) { return -1; };
+    static inline int am_getconfig_float(const char * path, float *value) { return -1; };
+    static inline int am_dumpallconfigs(void) { return -1; };
+    static inline int am_getconfig_bool(const char * path) { return -1; };
+#endif
+
 #ifdef  __cplusplus
 }
 #endif

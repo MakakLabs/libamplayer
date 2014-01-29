@@ -23,8 +23,6 @@
 #define VIDEO_GLOBAL_OFFSET_PATH "/sys/class/video/global_offset"
 #define FREE_SCALE_PATH  "/sys/class/graphics/fb0/free_scale"
 #define PPSCALER_PATH  "/sys/class/ppmgr/ppscaler"
-#define HDMI_AUTHENTICATE_PATH "/sys/module/hdmitx/parameters/hdmi_authenticated"
-
 
 static int rotation = 0;
 static int disp_width = 1920;
@@ -40,6 +38,7 @@ static int disp_height = 1080;
 
 //#define LOG_FUNCTION_NAME LOGI("%s-%d\n",__FUNCTION__,__LINE__);
 #define LOG_FUNCTION_NAME
+
 
 int  amvideo_utils_get_global_offset(void)
 {
@@ -294,19 +293,4 @@ int amvideo_utils_get_video_angle(int *angle)
     *angle = angle_value;
 
     return 0;
-}
-
-int amvideo_utils_get_hdmi_authenticate(void)
-{
-    LOG_FUNCTION_NAME    
-    int fd = -1;
-    int val = -1;
-    char  bcmd[16];
-    fd = open(HDMI_AUTHENTICATE_PATH, O_RDONLY);
-    if (fd >= 0) {
-        read(fd, bcmd, sizeof(bcmd));
-        val = strtol(bcmd, NULL, 10);
-        close(fd);
-    }
-    return val;   
 }

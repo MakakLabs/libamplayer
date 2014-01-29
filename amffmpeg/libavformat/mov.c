@@ -78,7 +78,6 @@ typedef struct MOVParseTableEntry {
 } MOVParseTableEntry;
 
 static const MOVParseTableEntry mov_default_parse_table[];
-#define MAX_READ_SEEK (1024*1024*3-32*1024)//DEF_MAX_READ_SEEK-block_read_size
 
 static int mov_metadata_track_or_disc_number(MOVContext *c, AVIOContext *pb, unsigned len, const char *type)
 {
@@ -617,12 +616,7 @@ static int mov_read_mdat(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     if(atom.size == 0) /* wrong one (MP4) */
         return 0;
     c->found_mdat=1;
-    /*
-    * Lujian.Hu 2012-12-14
-    * only use media_dataoffset to time_search(player_av.c) can not work correctly, because in mov_read_seek not only modify the pos to 
-    * media data offset but reset the sample pointer to the correct position according to the very timestamp
-    */
-    //c->fc->media_dataoffset = url_ftell(pb); 
+    c->fc->media_dataoffset = url_ftell(pb);
     return 0; /* now go for moov */
 }
 
@@ -1602,40 +1596,20 @@ static int mov_read_ctts(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     if (!sc->ctts_data)
         return AVERROR(ENOMEM);
     sc->ctts_count = entries;
-    int negative_count = 0;
-    int positive_count = 0;
 
-    for (i=0; i<entries; i++) {
+    for(i=0; i<entries; i++) {
         int count    =avio_rb32(pb);
         int duration =avio_rb32(pb);
 
         sc->ctts_data[i].count   = count;
         sc->ctts_data[i].duration= duration;
-
-        if(duration > 0)
-            positive_count++;
-        if(duration < 0)
-            negative_count++;
-
-        if (FFABS(duration) > (1<<28) && i+2<entries) {
-            av_log(c->fc, AV_LOG_WARNING, "CTTS invalid\n");
-            av_freep(&sc->ctts_data);
-            sc->ctts_count = 0;
-            return 0;
-        }
-
-        if (duration < 0 && i+2<entries)
+        if (duration < 0 && i+1<entries)
             sc->dts_shift = FFMAX(sc->dts_shift, -duration);
+	 if(url_interrupt_cb()) {
+	     av_log(NULL, AV_LOG_WARNING, "mov_read_stts interrupt, exit\n");
+	     return AVERROR_EXIT;
+         }		
     }
-
-    /*
-    * PTS = DTS (from stts) + CTS (from ctts)
-    *
-    * According to MPEG-4 ISO standard, CTS can never be negative, but quicktime allows 
-    * negative value. The CTS must be all positive or negative in that case, otherwise ignore the dts_shift.
-    */
-    if(positive_count > negative_count)
-        sc->dts_shift = 0;
 
     av_dlog(c->fc, "dts shift %d\n", sc->dts_shift);
 
@@ -2573,36 +2547,6 @@ static int mov_read_header(AVFormatContext *s, AVFormatParameters *ap)
 
     if (pb->seekable && mov->chapter_track > 0)
         mov_read_chapters(s);
-	
-
-    if(s->pb&&s->pb->local_playback!=1){//web live playback,check movie file 
-          int64_t amin_pos=INT64_MAX,vmin_pos=INT64_MAX,min=INT64_MAX;
-          int64_t amax_pos=0,vmax_pos=0,max=0;
-
-          for (int i = 0; i < s->nb_streams; i++) {
-	       AVStream *avst = s->streams[i];
-                min=INT64_MAX;
-                max=0;	 
-	      if(avst->nb_index_entries>0&&avst->index_entries[avst->nb_index_entries-1].pos>max)
-		max=avst->index_entries[avst->nb_index_entries-1].pos;
-	      if(avst->nb_index_entries>0&&avst->index_entries[0].pos<min)
-		min=avst->index_entries[0].pos;
-		
-	      if(avst->codec->codec_type==AVMEDIA_TYPE_AUDIO&&min<amin_pos&&max>amax_pos){
-		amin_pos=min;
-		amax_pos=max;
-	      }
-	      if(avst->codec->codec_type==AVMEDIA_TYPE_VIDEO&&min<vmin_pos&&max>vmax_pos){
-		vmin_pos=min;
-		vmax_pos=max;
-	     }	
-         }
-         if((vmin_pos>amax_pos&&abs(vmin_pos-amin_pos)>MAX_READ_SEEK&&amin_pos>=0&&amin_pos!=INT64_MAX)||
-	     (amin_pos>vmax_pos&&abs(amin_pos-vmin_pos)>MAX_READ_SEEK&&vmin_pos>=0&&vmin_pos!=INT64_MAX)){	     
-		url_set_more_data_seek(s->pb);
-		av_log(NULL,AV_LOG_WARNING, "May need cache more for smooth playback on line\n");
-         }
-    }
 
     return 0;
 }
@@ -2829,5 +2773,4 @@ AVInputFormat ff_mov_demuxer = {
     mov_read_packet,
     mov_read_close,
     mov_read_seek,
-    .flags=AVFMT_NOGENSEARCH,
 };

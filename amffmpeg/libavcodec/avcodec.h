@@ -238,7 +238,6 @@ enum CodecID {
     CODEC_ID_PCM_BLURAY,
     CODEC_ID_PCM_LXF,
     CODEC_ID_S302M,
-    CODEC_ID_PCM_WIFIDISPLAY,
 
     /* various ADPCM codecs */
     CODEC_ID_ADPCM_IMA_QT= 0x11000,
@@ -2933,8 +2932,6 @@ typedef struct AVCodecContext {
     /* added by Z.C
      * for some special ps files */
      int mpegps_video_idprobed;
-	/*for some special asf files */
-	 int durcount;
 } AVCodecContext;
 
 /**

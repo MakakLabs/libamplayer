@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include "version.h"
 #include <string.h>
+#include <stdint.h>
 
 
 static char versioninfo[256] = "N/A";

@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
@@ -46,7 +47,6 @@ Package_List pack_list;
 
 
 void *audio_decode_loop(void *args);
-void *audio_dtsdecode_loop(void *args);
 void *audio_getpackage_loop(void *args);
 
 static int set_sysfs_int(const char *path, int val);
@@ -72,7 +72,6 @@ audio_lib_t audio_lib_list[] =
 	{ACODEC_FMT_APE, "libape.so"},
 	{ACODEC_FMT_MPEG, "libmad.so"},
 	{ACODEC_FMT_FLAC, "libflac.so"},
-	{ACODEC_FMT_DTS, "libdtsdec.so"},	
 	NULL
 } ;
 
@@ -281,7 +280,9 @@ struct package * package_get()
         pack_list.first=NULL;
         pack_list.pack_num=0;
         pack_list.current=NULL;
-    }else if(pack_list.pack_num>1) {
+    }
+    else
+    {
         pack_list.first=pack_list.first->next;
         pack_list.pack_num--;
     }
@@ -507,12 +508,10 @@ static int audio_codec_init(aml_audio_dec_t *audec)
             usleep(100000);
         }
        
-        adec_print("==param= data_width:%d samplerate:%d channel:%d \n",audec->data_width,audec->samplerate,audec->channels);
 	audec->data_width=AV_SAMPLE_FMT_S16;
-        if(audec->channels>0){
-			audec->channels=(audec->channels>2? 2:audec->channels);
+        if(audec->channels>0)
             audec->adec_ops->channels=audec->channels;
-        }else
+        else
             audec->adec_ops->channels=audec->channels=2;
         if(audec->samplerate>0)
             audec->adec_ops->samplerate=audec->samplerate;
@@ -532,7 +531,7 @@ static int audio_codec_init(aml_audio_dec_t *audec)
             default:
                 audec->adec_ops->bps=16;
         }
-        adec_print("==param_applied= bps:%d samplerate:%d channel:%d \n",audec->adec_ops->bps,audec->adec_ops->samplerate,audec->adec_ops->channels);
+        adec_print("==param= bps:%d samplerate:%d channel:%d \n",audec->adec_ops->bps,audec->adec_ops->samplerate,audec->adec_ops->channels);
         audec->adec_ops->extradata_size=audec->extradata_size;
         if(audec->extradata_size>0)
             memcpy(audec->adec_ops->extradata,audec->extradata,audec->extradata_size);
@@ -803,7 +802,6 @@ static void adec_flag_check(aml_audio_dec_t *audec)
 
     if (audec->auto_mute && (audec->state > INITTED)) {
         aout_ops->pause(audec);
-	 usleep(10000);	
         while ((!audec->need_stop) && track_switch_pts(audec)) {
             usleep(1000);
         }
@@ -833,8 +831,8 @@ static void start_decode_thread(aml_audio_dec_t *audec)
         return ret;
     }
     sn_threadid=tid;
-	pthread_setname_np(tid,"AmadecDecodeLP");
-    adec_print("Create ffmpeg decode thread success! tid = %d\n", tid);  
+    adec_print("Create ffmpeg decode thread success! tid = %d\n", tid);
+    
 }
 static void stop_decode_thread(aml_audio_dec_t *audec)
 {

@@ -21,7 +21,6 @@
 #include "avformat.h"
 #include "libavutil/parseutils.h"
 #include <unistd.h>
-#include <errno.h>
 #include "internal.h"
 #include "network.h"
 #include "os_support.h"
@@ -71,7 +70,7 @@ static int tcp_open(URLContext *h, const char *uri, int flags)
         }
     }
     memset(&hints, 0, sizeof(hints));
-    if(am_getconfig_bool_def("media.libplayer.ipv4only",1))	
+    if(am_getconfig_bool("media.libplayer.ipv4only"))	
     		hints.ai_family = AF_INET;
     else
 		hints.ai_family = AF_UNSPEC;	
@@ -213,16 +212,13 @@ static int tcp_read(URLContext *h, uint8_t *buf, int size)
 
     if (!(h->flags & AVIO_FLAG_NONBLOCK)) {
         ret = ff_network_wait_fd(s->fd, 0);
-        if (ret < 0){
-            av_log(h, AV_LOG_INFO,"ff_network_wait_fd return error %d,errmsg:%s \n",ret,strerror(errno)!=NULL?strerror(errno):"unkown");
+        if (ret < 0)
             return ret;
-
-        }
     }
     ret = recv(s->fd, buf, size, 0);
-    if(ret<=0){
-        av_log(h, AV_LOG_INFO,"tcp_read return error %d,errno:%d,errmsg:%s \n",ret,errno,strerror(errno)!=NULL?strerror(errno):"unkown");
-    }
+	if(ret<=0){
+		av_log(h, AV_LOG_INFO,"tcp_read return error %d \n",ret);
+	}
     return ret < 0 ? ff_neterrno() : ret;
 }
 

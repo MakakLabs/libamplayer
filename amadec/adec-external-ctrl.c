@@ -52,11 +52,6 @@ int audio_decode_init(void **handle, arm_audio_info *a_ainfo)
     audec->extradata_size=a_ainfo->extradata_size;
 	audec->SessionID=a_ainfo->SessionID;
 	audec->dspdec_not_supported = a_ainfo->dspdec_not_supported;
-	audec->droppcm_flag = 0;	
-	if (a_ainfo->droppcm_flag) {
-		audec->droppcm_flag = a_ainfo->droppcm_flag;
-		a_ainfo->droppcm_flag = 0;
-	}
     if(a_ainfo->extradata_size>0&&a_ainfo->extradata_size<=AUDIO_EXTRA_DATA_SIZE)
         memcpy((char*)audec->extradata,(char*)a_ainfo->extradata,a_ainfo->extradata_size);
    
@@ -593,4 +588,22 @@ int audio_get_soundtrack(void *handle, int* strack )
     *strack= audec->soundtrack;
 
     return ret;    
+}
+
+int audio_set_av_delay(void *handle, int delay)
+{
+    aml_audio_dec_t *audec = (aml_audio_dec_t *)handle;
+    if (!handle) {
+        adec_print("audio handle is NULL !\n");
+        return -1;
+    }
+
+    if (delay > 500)
+        delay = 500;
+    else if (delay < -500)
+        delay = -500;
+
+    audec->audio_delay = delay;
+
+    return 0;
 }

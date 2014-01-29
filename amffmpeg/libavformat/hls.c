@@ -35,6 +35,7 @@
 #include <unistd.h>
 #include "avio_internal.h"
 #include "url.h"
+#include "aviolpbuf.h"
 
 #define INITIAL_BUFFER_SIZE (1024*4)
 #define USED_LP_BUF

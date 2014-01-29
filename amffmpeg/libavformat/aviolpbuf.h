@@ -12,7 +12,8 @@
 
 
 
-typedef struct  url_lpbuf{
+typedef struct  url_lpbuf{
+
 	unsigned char *buffer;
 	unsigned char *buffer_end;
 	int buffer_size;

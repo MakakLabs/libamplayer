@@ -339,22 +339,8 @@ AVInputFormat *av_probe_input_format3(AVProbeData *pd, int is_opened, int *score
         if (score > score_max) {
             score_max = score;
             fmt = fmt1;
-        }else if (score == score_max) {
-            int cmf_config=am_getconfig_bool("media.libplayer.tsincmf");
-            if(score == AVPROBE_SCORE_MAX) {
-                if(!strncmp(fmt->name, "cmf", 3)) {
-                    if(cmf_config && !strncmp(fmt1->name, "mpegts", 6)) {
-                            continue;
-                    } else if(!strncmp(fmt1->name, "flv", 3) || !strncmp(fmt1->name, "mov", 3)) {
-                        continue;
-                    } else {
-                        fmt = fmt1;
-                        continue;
-                    }
-                }
-            }
+        }else if (score == score_max)
             fmt = NULL;
-        }
     }
     *score_ret= score_max;
      if(lpd.pads[0] != 0) 
@@ -390,7 +376,6 @@ static int set_codec_from_probe_data(AVFormatContext *s, AVStream *st, AVProbeDa
         { "h264"     , CODEC_ID_H264      , AVMEDIA_TYPE_VIDEO },
         { "m4v"      , CODEC_ID_MPEG4     , AVMEDIA_TYPE_VIDEO },
         { "mp3"      , CODEC_ID_MP3       , AVMEDIA_TYPE_AUDIO },
-		{ "mp2"      , CODEC_ID_MP2       , AVMEDIA_TYPE_AUDIO },
         { "mpegvideo", CODEC_ID_MPEG2VIDEO, AVMEDIA_TYPE_VIDEO },
         { 0 }
     };
@@ -751,25 +736,8 @@ static auto_switch_protol_t *try_get_mached_new_prot(ByteIOContext *pb,const cha
 }
 
 
-//add this api for open third-parts libmms supports,by peter,20121121
-#include "ammodule.h"
-static int is_use_external_module(const char* mod_name){
-    int ret = -1;      
-    const char* ex_mod = "media.libplayer.modules";
-    char value[CONFIG_VALUE_MAX];
-    ret = am_getconfig(ex_mod, value,NULL);
-    if(ret<1){
-        return 0;
-    }
-    ret = ammodule_match_check(value,mod_name);
-  
-    if(ret>0){
-        return 1;
-    }else{
-        return 0;
-    }
 
-}
+
 /* open input file and probe the format if necessary */
 static int init_input(AVFormatContext *s, const char *filename,const char * headers)
 {
@@ -777,7 +745,6 @@ static int init_input(AVFormatContext *s, const char *filename,const char * head
     AVProbeData pd = {filename, NULL, 0,NULL};
     auto_switch_protol_t* newp=NULL;
     if (s->pb) {
-	  s->pb->is_segment_media = 0;	
         s->flags |= AVFMT_FLAG_CUSTOM_IO;
         if (!s->iformat)
             return av_probe_input_buffer(s->pb, &s->iformat, filename, s, 0, 0);
@@ -790,31 +757,15 @@ static int init_input(AVFormatContext *s, const char *filename,const char * head
         return 0;
     if ((ret = avio_open_h(&s->pb, filename, AVIO_FLAG_READ, headers)) < 0)
        return ret;
-    s->pb->is_segment_media = 0;		
     newp=try_get_mached_new_prot(s->pb,filename);
     if(newp!=NULL){
 			char *listfile;
 			int err;
-                    char* ptr = NULL;
-			listfile=av_mallocz(MAX_URL_SIZE);
+			listfile=av_malloc(strlen(filename)+10);
 			if(!listfile)
 				return AVERROR(ENOMEM);
-                    if(av_strstart(newp->prefix,"mmsh:",&ptr)&&(is_use_external_module("mms_mod")>0)){                      
-                        strcpy(listfile,"mmsx:");
-                        strcpy(listfile+strlen("mmsx:"),filename);
-                        
-                    }else{
-                        if(av_strstart(newp->prefix,"list:",&ptr)&&(is_use_external_module("vhls_mod")>0)){
-                            strcpy(listfile,"vhls:");
-                        }else{
-                        strcpy(listfile,newp->prefix);
-                        }
-                        if(s->pb->reallocation!=NULL){
-                            strcpy(listfile+strlen(newp->prefix),s->pb->reallocation);
-                        }else{
-                        strcpy(listfile+strlen(newp->prefix),filename);
-                        }
-                    }
+			strcpy(listfile,newp->prefix);
+			strcpy(listfile+strlen(newp->prefix),filename);
 			url_fclose(s->pb);
 			s->pb=NULL;
 			if ((err=avio_open_h(&s->pb,listfile, AVIO_FLAG_READ, headers)) < 0) {
@@ -879,6 +830,12 @@ int avformat_open_input_header(AVFormatContext **ps, const char *filename, AVInp
     /* e.g. AVFMT_NOFILE formats will not have a AVIOContext */
     if (s->pb){
         ff_id3v2_read(s, ID3v2_DEFAULT_MAGIC); 
+	 if(!av_dict_get(s->metadata, "title"  , NULL, 0)||!av_dict_get(s->metadata, "artist" , NULL, 0)||
+	  !av_dict_get(s->metadata, "album"  , NULL, 0)||!av_dict_get(s->metadata, "date"  , NULL, 0)||
+	  !av_dict_get(s->metadata, "comment" , NULL, 0)||!av_dict_get(s->metadata, "track"  , NULL, 0)||
+	  !av_dict_get(s->metadata, "genre"  , NULL, 0)){
+	         ff_id3v1_read(s);	
+	 }
     }
 
     if (!(s->flags&AVFMT_FLAG_PRIV_OPT) && s->iformat->read_header)
@@ -1842,7 +1799,7 @@ int64_t av_gen_search(AVFormatContext *s, int stream_index, int64_t target_ts, i
     }
 
     if(ts_max == AV_NOPTS_VALUE){
-        int64_t step= 1024;
+        int step= 1024;
         filesize = avio_size(s->pb);
         pos_max = filesize - 1;
         do{
@@ -1851,7 +1808,7 @@ int64_t av_gen_search(AVFormatContext *s, int stream_index, int64_t target_ts, i
             pos_max -= step;
             ts_max = read_timestamp(s, stream_index, &pos_max, pos_max + step);
             step += step;
-        }while(ts_max == AV_NOPTS_VALUE && pos_max >= step && step < s->file_size);
+        }while(ts_max == AV_NOPTS_VALUE && pos_max >= step /*&& step < 0x6400000*//*100M*/);
 
 		if (ts_max == AV_NOPTS_VALUE){
 			av_log(NULL, AV_LOG_ERROR, "av_gen_search failed, max pts not found\n");
@@ -2032,13 +1989,6 @@ int av_seek_frame(AVFormatContext *s, int stream_index, int64_t timestamp, int f
 
     ff_read_frame_flush(s);
 
-   #if 1
-    if (s->pb && s->pb->is_slowmedia) { 
-        if(!memcmp(s->iformat->name,"mpegts",6)){
-            return url_fseektotime(s->pb, timestamp/(1000*1000), flags);
-        }
-    }
-   #endif
     if(flags & AVSEEK_FLAG_BYTE)
         return av_seek_frame_byte(s, stream_index, timestamp, flags);
 
@@ -2050,7 +2000,7 @@ int av_seek_frame(AVFormatContext *s, int stream_index, int64_t timestamp, int f
     st= s->streams[stream_index];
    /* timestamp for default must be expressed in AV_TIME_BASE units */
     timestamp = av_rescale(timestamp, st->time_base.den, AV_TIME_BASE * (int64_t)st->time_base.num);
-
+   
     /* first, we try the format specific seek */
     if (s->iformat->read_seek)
         ret = s->iformat->read_seek(s, stream_index, timestamp, flags);
@@ -2134,7 +2084,7 @@ static void av_update_stream_timings(AVFormatContext *ic)
         
         /* added by Z.C. to set start time */
         if (st->start_time == 0) {
-            if (st->nb_index_entries && st->index_entries[0].timestamp > 0) {
+            if (st->nb_index_entries) {
                 st->start_time = st->index_entries[0].timestamp;
                 av_log(NULL, AV_LOG_INFO, "[%s:%d] set stream %d start_time to first pts 0x%llx\n", 
                     __FUNCTION__, __LINE__, i, st->start_time);
@@ -2182,17 +2132,6 @@ static void av_update_stream_timings(AVFormatContext *ic)
                 ic->bit_rate = bit_rate ;
             }
         }
-#define IS_GTHD_VBR(a,b) ((5*a > 6*b) ? 1 : 0) // if (real bitrate > avg bitrate 20%) we think it is VBR, the offset for seek use the time ratio.
-#define IS_LTHD_VBR(a,b) ((5*a < 4*b) ? 1 : 0)
-        if (ic->file_size > 0 && ic->pb && !ic->pb->is_slowmedia) {
-            unsigned int avg_bitrate = (double)ic->file_size * 8.0 * AV_TIME_BASE/(double)ic->duration;
-            if (IS_GTHD_VBR(ic->bit_rate, avg_bitrate) || IS_LTHD_VBR(ic->bit_rate, avg_bitrate)){
-                ic->is_vbr = 1;
-            }
-            else {
-                ic->is_vbr = -1;
-            }
-        }
     }
 }
 
@@ -2220,23 +2159,15 @@ static void av_estimate_timings_from_bit_rate(AVFormatContext *ic)
     int64_t filesize, duration;
     int bit_rate, i;
     AVStream *st;
-	int64_t fulltimesecs;
-	int bit_rate_err=0;
 
     /* if bit_rate is already set, we believe it */
     if (ic->bit_rate <= 0) {
         bit_rate = 0;
         for(i=0;i<ic->nb_streams;i++) {
             st = ic->streams[i];
-            if ((st->codec->bit_rate > 0)){
-			bit_rate += st->codec->bit_rate;
-		}else{
-			bit_rate_err++;
-		}
-		if (bit_rate_err >= ic->nb_streams/2){
-			bit_rate =0;
-		}
-	}
+            if (st->codec->bit_rate > 0)
+            bit_rate += st->codec->bit_rate;
+        }
         ic->bit_rate = bit_rate;
     }
 
@@ -2254,16 +2185,6 @@ static void av_estimate_timings_from_bit_rate(AVFormatContext *ic)
             }
         }
     }
-	if (ic->duration == AV_NOPTS_VALUE &&
-		ic->bit_rate == 0 &&
-		 ic->nb_chapters > 0){
-		  AVChapter *ch = ic->chapters[ic->nb_chapters-1];
-		  fulltimesecs = (int64_t)(ch->end * av_q2d(ch->time_base));
-		  av_log(NULL, AV_LOG_INFO, "chapters fulltime secs [%lld] \n",fulltimesecs,st->time_base.num,st->time_base.den);
-		  duration = av_rescale(fulltimesecs, st->time_base.den,(int64_t)st->time_base.num);
-		  if (st->duration == AV_NOPTS_VALUE)
-			  st->duration = duration ;
-	}
 }
 
 #define DURATION_MAX_READ_SIZE 150000
@@ -2580,7 +2501,6 @@ static void av_estimate_timeings_chapters(AVFormatContext * ic, int64_t old_offs
     int64_t valid_offset, offset, last_offset, duration;
 	int64_t last_pts[MAX_STREAMS], pts_discontinue[MAX_STREAMS];	
     int retry=0;   
-    unsigned int cur_nb_streams; // number of streams currently found
 #define DISCONTINUE_PTS_VALUE  (0xffffffff)
 
     ic->cur_st = NULL;
@@ -2613,7 +2533,6 @@ static void av_estimate_timeings_chapters(AVFormatContext * ic, int64_t old_offs
     /* XXX: may need to support wrapping */
     valid_offset = ic->valid_offset;
     end_time = AV_NOPTS_VALUE;
-    cur_nb_streams = ic->nb_streams;
     do{
 	    offset = valid_offset - (DURATION_MAX_READ_SIZE<<retry);
 	    if (offset < 0)
@@ -2634,28 +2553,6 @@ static void av_estimate_timeings_chapters(AVFormatContext * ic, int64_t old_offs
 	        	break;
 	        }
 		        //av_log(NULL, AV_LOG_INFO, "[%s:%d] read a packet, pkt->pts=0x%llx\n",__FUNCTION__, __LINE__,pkt->pts);
-
-            // For VOB, new streams may be found after reading a new packet.
-            // If this happens, we need to init for the new streams.
-            if (ic->nb_streams > cur_nb_streams) {
-                for (i = (int)cur_nb_streams; i < (int)ic->nb_streams; i++) {
-                    last_pts[i] = AV_NOPTS_VALUE;
-                    pts_discontinue[i] = AV_NOPTS_VALUE;
-                    st = ic->streams[i];
-                    if (st->start_time != AV_NOPTS_VALUE) {
-                        start_time[i] = st->start_time;
-                        max_time[i] = start_time[i];
-                    }else if(st->first_dts != AV_NOPTS_VALUE){
-                        start_time[i] = st->first_dts;
-                        max_time[i] = start_time[i];
-                    }else {
-                        start_time[i] = 0;
-                        max_time[i] = 0;
-                    }
-                }
-                cur_nb_streams = ic->nb_streams;
-            }
-
 	        read_size += pkt->size;
 	        st = ic->streams[pkt->stream_index];
 	        if (pkt->pts != AV_NOPTS_VALUE){ 				
@@ -2951,13 +2848,7 @@ static int has_codec_parameters(AVCodecContext *enc)
     return enc->codec_id != CODEC_ID_NONE && val != 0;
 }
 
-//fastmode refer to different mode
-#define SOFTDEMUX_PARSE_MODE  0
-#define PARSE_MODE_BASE 8
-#define ASF_PARSE_MODE  8
-#define SPEED_PARSE_MODE 9
-#define WFD_PARSE_MODE  10
-
+//fastmode == 2,refer to ts streaming mode
 static int has_codec_parameters_ex(AVCodecContext *enc,int fastmode)
 {
     int val;
@@ -2988,31 +2879,21 @@ static int has_codec_parameters_ex(AVCodecContext *enc,int fastmode)
 		case AVMEDIA_TYPE_AUDIO:
 		    //val = enc->sample_rate && enc->channels && enc->sample_fmt != AV_SAMPLE_FMT_NONE;
 		    
-		    if((fastmode == 2) && (enc->codec_id != CODEC_ID_PCM_WIFIDISPLAY)){
+		    if(fastmode == 2){
 		       val =1;
                  }else{
                     val = enc->sample_rate && enc->channels;
                  }
 		    break;
 		case AVMEDIA_TYPE_VIDEO:
-			if(fastmode == 8){
-			   val = (enc->durcount>15?1:0)&&enc->width;
-			 //  av_log(NULL, AV_LOG_INFO, "[%s]enc->durcount=%d\n", __FUNCTION__, enc->durcount);
-			}else{
-		           val = enc->width;
-			}
+		    val = enc->width;
 		    break;
 		default:
 		    val = 1;
 		    break;
 		}
     }
-
-    if (WFD_PARSE_MODE == fastmode) {
-        return val != 0;
-    } else {
-        return enc->codec_id != CODEC_ID_NONE && val != 0;
-    }
+    return enc->codec_id != CODEC_ID_NONE && val != 0;
 }
 
 
@@ -3154,7 +3035,6 @@ static int tb_unreliable(AVCodecContext *c){
 
 #define TRACE() av_log(NULL, AV_LOG_INFO, "[%s:%d]\n", __FUNCTION__, __LINE__)
 #define SPEED_PARSE_MODE 2
-#define ASF_PARSE_MODE  8
 int av_find_stream_info(AVFormatContext *ic)
 {
     int i, count, ret, read_size, j;
@@ -3163,33 +3043,8 @@ int av_find_stream_info(AVFormatContext *ic)
     int64_t file_size = 0;
     int bit_rate = 0;
     int64_t old_offset=-1;
-    int fast_switch = 1;
-    float value;
-	int64_t streamtype = -1;
-
-    if (am_getconfig_float("media.libplayer.fastswitch", &value) == 0) {
-        fast_switch = (int)value;
-    }
-
-	if(ic->pb&&ic->pb->local_playback && fast_switch){
-		av_log(NULL,AV_LOG_ERROR,"localplay force close fastswitch for parser profile\n");
-		fast_switch = 0;
-	}
-
-	if ((!strcmp(ic->iformat->name, "mpegts"))){
-		if (ic->pb&&ic->pb->is_slowmedia&&am_getconfig_bool("libplayer.netts.softdemux")){
-				fast_switch=SOFTDEMUX_PARSE_MODE;
-		}else if (am_getconfig_bool("libplayer.livets.softdemux")){
-			avio_getinfo(ic->pb,AVCMD_HLS_STREAMTYPE,0,&streamtype);
-	    	if (ic->pb&&ic->pb->is_slowmedia&&(streamtype==0)){
-				fast_switch=SOFTDEMUX_PARSE_MODE;
-			}
-		}
-	}
-
-    av_log(NULL, AV_LOG_INFO, "[%s]iformat->name[%s]fast_switch=%d streamtype=%lld\n", \
-		__FUNCTION__,ic->iformat->name,fast_switch,streamtype);
-	
+    int fast_switch=am_getconfig_bool("media.libplayer.fastswitch");
+    av_log(NULL, AV_LOG_INFO, "[%s]fast_switch=%d\n", __FUNCTION__, fast_switch);
     if(ic->pb!=NULL)
     	old_offset= avio_tell(ic->pb);	
     if(!strcmp(ic->iformat->name, "DRMdemux")) {       
@@ -3285,18 +3140,8 @@ int av_find_stream_info(AVFormatContext *ic)
             st = ic->streams[i];
             int parse_mode = fast_switch;
             if(ic->pb && ic->pb->is_streamed ==1&&!strcmp(ic->iformat->name, "mpegts")){
-                parse_mode = PARSE_MODE_BASE + fast_switch;
-            }
-	   if(!strcmp(ic->iformat->name, "asf")){
-	        parse_mode = ASF_PARSE_MODE ;
-		av_log(NULL, AV_LOG_INFO, "parse_mode=%d\n",parse_mode);
-	    }
-            if ((parse_mode == WFD_PARSE_MODE) && (st->request_probe >= 0)) {
                 parse_mode = SPEED_PARSE_MODE;
             }
-       		//av_log(NULL, AV_LOG_INFO, "parse_mode=%d\n",parse_mode);
-            st->codec->durcount=st->info->duration_count;
-
             if (!has_codec_parameters_ex(st->codec,parse_mode)){
                 break;
             }else{
@@ -3327,17 +3172,17 @@ int av_find_stream_info(AVFormatContext *ic)
             /* NOTE: if the format has no header, then we need to read
                some packets to get most of the streams, so we cannot
                stop here */
-            if (!(ic->ctx_flags & AVFMTCTX_NOHEADER) ||(fast_switch && ic->nb_streams>=2) || (2==fast_switch && 1==ic->nb_streams)) {
+            if (!(ic->ctx_flags & AVFMTCTX_NOHEADER) ||(fast_switch && ic->nb_streams>=2)) {
                 /* if we found the info for all the codecs, we can stop */
                 ret = count;
-                av_log(ic, AV_LOG_INFO, "All info found\n");
+                av_log(ic, AV_LOG_DEBUG, "All info found\n");
                 break;
             }
         }
         /* we did not get all the codec info, but we read too much data */
         if (read_size >= ic->probesize) {
             ret = count;
-            av_log(ic, AV_LOG_ERROR, "Probe buffer size limit %d reached, stream %d\n", ic->probesize, ic->nb_streams);
+            av_log(ic, AV_LOG_DEBUG, "Probe buffer size limit %d reached\n", ic->probesize);
             break;
         }	
         /* NOTE: a new stream can be added there if no header in file

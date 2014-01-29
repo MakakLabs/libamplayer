@@ -31,7 +31,6 @@
 #include "avformat.h"
 #include "avio_internal.h"
 #include "flv.h"
-#include <stdio.h>
 
 typedef struct {
     int wrong_dts; ///< wrong dts due to negative cts
@@ -557,10 +556,10 @@ static int flv_read_packet(AVFormatContext *s, AVPacket *pkt)
             pts = dts + cts;
             if (cts < 0) { // dts are wrong
                 flv->wrong_dts = 1;
-                av_log(s, AV_LOG_WARNING, "negative cts, previous timestamps might be wrong.cts=%d, dts=%lld, pts=%lld\n", cts, dts, pts);
+                av_log(s, AV_LOG_WARNING, "negative cts, previous timestamps might be wrong\n");
             }
             if (flv->wrong_dts)
-                pts = AV_NOPTS_VALUE;
+                dts = AV_NOPTS_VALUE;
         }
         if (type == 0) {
             if ((ret = flv_get_extradata(s, st, size)) < 0)

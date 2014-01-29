@@ -648,7 +648,6 @@ typedef struct AVStream {
      float special_fps;  // for some special stream
      int rotation_degree;
     int encrypt;
-     int no_program;
 } AVStream;
 
 #define AV_PROGRAM_RUNNING 1
@@ -889,7 +888,6 @@ typedef struct AVFormatContext {
     /* added by Z.C for some ps/ts file seeking */
     int64_t valid_offset;
     int valid_offset_done;
-    char is_vbr;
 
     /* added by Z.C for avi or some other files seekable */
     int seekable;

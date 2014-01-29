@@ -406,8 +406,10 @@ static int rm_read_header(AVFormatContext *s, AVFormatParameters *ap)
         return AVERROR(EIO);
     }
 
-    tag_size = avio_rb32(pb);
-    avio_skip(pb, tag_size - 8);
+    avio_rb32(pb); /* header size */
+    avio_rb16(pb);
+    avio_rb32(pb);
+    avio_rb32(pb); /* number of headers */
 
     for(;;) {
         if (url_feof(pb))
