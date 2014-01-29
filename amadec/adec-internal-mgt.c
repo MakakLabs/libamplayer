@@ -17,12 +17,27 @@
 
 #include <audio-dec.h>
 #include <adec-pts-mgt.h>
-
 #ifdef ANDROID
 #include <cutils/properties.h>
 #else
 #define PROPERTY_VALUE_MAX 92
 #endif
+#include <dts_enc.h>
+static int set_tsync_enable(int enable)
+{
+    int fd;
+    char *path = "/sys/class/tsync/enable";
+    char  bcmd[16];
+    fd = open(path, O_CREAT | O_RDWR | O_TRUNC, 0644);
+    if (fd >= 0) {
+        sprintf(bcmd, "%d", enable);
+        write(fd, bcmd, strlen(bcmd));
+        close(fd);
+        return 0;
+    }
+    
+    return -1;
+}
 
 /**
  * \brief set audio output mode.
@@ -123,15 +138,57 @@ static void start_adec(aml_audio_dec_t *audec)
     int ret;
     audio_out_operations_t *aout_ops = &audec->aout_ops;
     dsp_operations_t *dsp_ops = &audec->adsp_ops;
+	int fd=0;
+	unsigned long  vpts,apts;
+	int times=0;
+    char buf[32];
+	apts = vpts = 0;
 
+	audec->no_first_apts = 0;
     if (audec->state == INITTED) {
         audec->state = ACTIVE;
 
-        while ((!audiodsp_get_first_pts_flag(dsp_ops)) && (!audec->need_stop)) {
-            adec_print("wait first pts checkin complete !");
+        while ((!audiodsp_get_first_pts_flag(dsp_ops)) && (!audec->need_stop) && (!audec->no_first_apts)) {
+            adec_print("wait first pts checkin complete times=%d,!\n",times);
+			times++;
+
+			if (times>=5) {
+				// read vpts
+				fd = open(TSYNC_VPTS, O_RDONLY);
+				if (fd < 0) {
+					adec_print("unable to open file %s,\n", TSYNC_VPTS);
+					return -1;
+				}
+				
+				read(fd, buf, sizeof(buf));
+				if (sscanf(buf, "0x%lx", &vpts) < 1) {
+					adec_print("unable to get vpts from: %s", buf);
+					return -1;
+				}
+				close(fd);
+
+				// save vpts to apts
+				adec_print("## can't get first apts, save vpts to apts,vpts=%lx, \n",vpts);
+				fd = open(TSYNC_APTS, O_RDWR);
+			    if (fd < 0) {
+			        adec_print("unable to open file %s,\n", TSYNC_APTS);
+			        return -1;
+			    }
+
+			    sprintf(buf, "0x%lx", vpts);
+			    write(fd, buf, strlen(buf));
+				close(fd);
+
+				audec->no_first_apts = 1;
+			}
             usleep(100000);
         }
-
+         /*Since audio_track->start consumed too much time 
+        *for the first time after platform restart, 
+        *so execute start cmd before adec_pts_start
+        */
+        aout_ops->start(audec);
+        aout_ops->pause(audec);
         /*start  the  the pts scr,...*/
         ret = adec_pts_start(audec);
 
@@ -153,7 +210,7 @@ static void start_adec(aml_audio_dec_t *audec)
             audec->auto_mute = 0;
         }
 
-        aout_ops->start(audec);
+        aout_ops->resume(audec);
 
     }
 }
@@ -265,7 +322,8 @@ static void adec_flag_check(aml_audio_dec_t *audec)
 
     if (audec->auto_mute && (audec->state > INITTED) &&(audec->state != PAUSED)) {
         aout_ops->pause(audec);
-        adec_print("automute, puase audio out!\n");
+        adec_print("automute, pause audio out!\n");
+	 usleep(10000);			
         while ((!audec->need_stop) && track_switch_pts(audec)) {
             usleep(1000);
         }
@@ -331,6 +389,9 @@ static void *adec_message_loop(void *args)
             audec->state = INITTED;
             adec_print("Audio out device init ok!");
             start_adec(audec);
+            if(dtsenc_init()!=-1)
+                dtsenc_start();
+            
             break;
         }
 
@@ -360,24 +421,28 @@ static void *adec_message_loop(void *args)
 
             adec_print("Receive START Command!\n");
             start_adec(audec);
+            dtsenc_start();
             break;
 
         case CMD_PAUSE:
 
             adec_print("Receive PAUSE Command!");
             pause_adec(audec);
+            dtsenc_pause();
             break;
 
         case CMD_RESUME:
 
             adec_print("Receive RESUME Command!");
             resume_adec(audec);
+            dtsenc_resume();
             break;
 
         case CMD_STOP:
 
             adec_print("Receive STOP Command!");
             stop_adec(audec);
+            dtsenc_stop();
             break;
 
         case CMD_MUTE:
@@ -431,6 +496,7 @@ static void *adec_message_loop(void *args)
 
             adec_print("Receive RELEASE Command!");
             release_adec(audec);
+            dtsenc_release();
             break;
 
         default:
@@ -790,6 +856,7 @@ static int set_audio_decoder(codec_para_t *pcodec)
         }
     }
 	
+	#ifdef ANDROID
 	ret = property_get("media.arm.audio.decoder",value,NULL);
 	adec_print("media.amplayer.audiocodec = %s, t->type = %s\n", value, t->type);
 	if (ret>0 && match_types(t->type,value))
@@ -813,7 +880,8 @@ static int set_audio_decoder(codec_para_t *pcodec)
 		audio_decoder = AUDIO_FFMPEG_DECODER;
 		return 0;
 	} 
-	
+	#endif
+
 	audio_decoder = AUDIO_ARC_DECODER; //set arc decoder as default
 	return 0;
 }
@@ -837,8 +905,7 @@ static int set_audio_decoder(aml_audio_dec_t *audec)
             break;
         }
     }
-	
-#ifdef ANDROID
+ 	#ifdef ANDROID	
 	ret = property_get("media.arm.audio.decoder",value,NULL);
 	adec_print("media.amplayer.audiocodec = %s, t->type = %s\n", value, t->type);
 	if (ret>0 && match_types(t->type,value))
@@ -867,8 +934,8 @@ static int set_audio_decoder(aml_audio_dec_t *audec)
 		audio_decoder = AUDIO_FFMPEG_DECODER;
 		return 0;
 	} 
-#endif
-	
+	#endif
+
 	audio_decoder = AUDIO_ARC_DECODER; //set arc decoder as default
 	if(audec->dspdec_not_supported == 1){
 		audio_decoder = AUDIO_ARM_DECODER;	
@@ -903,25 +970,53 @@ int get_audio_decoder(void)
 #endif	
 }
 
+int vdec_pts_pause(void)
+{
+    int fd;
+    char buf[32];
+
+    fd = open(TSYNC_EVENT, O_WRONLY);
+    if (fd < 0) {
+        adec_print("unable to open file %s,err: ", TSYNC_EVENT/*, strerror(errno)*/);
+        return -1;
+    }
+
+    sprintf(buf, "VIDEO_PAUSE:0x1");
+    write(fd, buf, strlen(buf));
+    close(fd);
+
+    return 0;
+}
 int audiodec_init(aml_audio_dec_t *audec)
 {
     int ret = 0;
     pthread_t    tid;
+	char value[PROPERTY_VALUE_MAX]={0};
     adec_print("audiodec_init!");
     adec_message_pool_init(audec);
     get_output_func(audec);
     int nCodecType=audec->format;
     set_audio_decoder(audec);
     audec->format_changed_flag=0;
+	
+	if(property_get("sys.amplayer.drop_pcm",value,NULL) > 0)
+		if((!strcmp(value,"1")||!strcmp(value,"true")) && (audec->droppcm_flag))
+		{
+			set_tsync_enable(0);
+			vdec_pts_pause();
+		}
+		
     if (get_audio_decoder() == AUDIO_ARC_DECODER) {
     		audec->adsp_ops.dsp_file_fd = -1;
 		ret = pthread_create(&tid, NULL, (void *)adec_message_loop, (void *)audec);
+		pthread_setname_np(tid,"AmadecMsgloop");
     }
     else 
     {
 		int codec_type=get_audio_decoder();
 		RegisterDecode(audec,codec_type);
 		ret = pthread_create(&tid, NULL, (void *)adec_armdec_loop, (void *)audec);
+		pthread_setname_np(tid,"AmadecArmdecLP");
     }
     if (ret != 0) {
         adec_print("Create adec main thread failed!\n");

@@ -5,8 +5,7 @@
 #include <stream_format.h>
 
 #define MSG_SIZE                    64
-#define MAX_CHAPTERS                64
-#define MAX_VIDEO_STREAMS           8
+#define MAX_VIDEO_STREAMS           10
 #define MAX_AUDIO_STREAMS           8
 #define MAX_SUB_INTERNAL            8
 #define MAX_SUB_EXTERNAL            24
@@ -114,7 +113,6 @@ typedef struct
     aformat_t aformat;
     int duration;
 	audio_tag_info *audio_tag;    
-    char audio_language[4];
 }maudio_info_t;
 
 typedef struct
@@ -149,15 +147,8 @@ typedef struct
     int cur_sub_index;	
     int seekable;
     int drm_check;
-    int has_chapter;
-    int total_chapter_num;
+	int adif_file_flag;
 }mstream_info_t;
-
-typedef struct
-{
-    char    *name;
-    int64_t seekto_ms;
-} mchapter_info_t;
 
 typedef struct
 {	
@@ -165,7 +156,6 @@ typedef struct
 	mvideo_info_t *video_info[MAX_VIDEO_STREAMS];
 	maudio_info_t *audio_info[MAX_AUDIO_STREAMS];
     msub_info_t *sub_info[MAX_SUB_STREAMS];
-    mchapter_info_t *chapter_info[MAX_CHAPTERS];
 }media_info_t;
 
 typedef struct player_info
@@ -192,6 +182,7 @@ typedef struct player_info
 	int64_t	bufed_pos;
 	int	bufed_time;/* Second*/
     unsigned int drm_rental;
+	int64_t download_speed; //download speed
 }player_info_t;
 
 typedef struct pid_info
@@ -213,7 +204,7 @@ typedef struct player_file_type
 #define STATE_PRE(sta) (sta>>16)
 #define PLAYER_THREAD_IS_INITING(sta)	(STATE_PRE(sta)==0x1)
 #define PLAYER_THREAD_IS_RUNNING(sta)	(STATE_PRE(sta)==0x2)
-#define PLAYER_THREAD_IS_STOPPED(sta)	(STATE_PRE(sta)==0x3)
+#define PLAYER_THREAD_IS_STOPPED(sta)	(sta==PLAYER_EXIT)
 
 typedef int (*update_state_fun_t)(int pid,player_info_t *) ;
 typedef int (*notify_callback)(int pid,int msg,unsigned long ext1,unsigned long ext2);
@@ -226,6 +217,7 @@ typedef enum
 	PLAYER_EVENTS_FILE_TYPE,				///<ext1=player_file_type_t*,ext2=0
 	PLAYER_EVENTS_HTTP_WV,				        ///<(need use DRMExtractor),ext1=0, ext2=0
 	PLAYER_EVENTS_HWBUF_DATA_SIZE_CHANGED,		///<(need use DRMExtractor),ext1=0, ext2=0
+	PLAYER_EVENTS_NOT_SUPPORT_SEEKABLE,     //not support seek;
 }player_events;
 
 typedef struct
@@ -293,6 +285,7 @@ typedef struct
 	int buffing_starttime_s;			//for rest buffing_middle,buffering seconds data to start.
 	int buffing_force_delay_s;
 	int lowbuffermode_flag;
+	int lowbuffermode_limited_ms;
 	int reserved [56];					//reserved  for furthur used,some one add more ,can del reserved num
 	int SessionID;
  }play_control_t; 

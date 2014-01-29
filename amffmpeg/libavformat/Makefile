@@ -3,7 +3,7 @@ include $(SUBDIR)../config.mak
 NAME = avformat
 FFLIBS = avcodec avutil
 
-HEADERS = avformat.h avio.h version.h aviolpcache.h
+HEADERS = avformat.h avio.h version.h
 
 OBJS = allformats.o         \
        cutils.o             \
@@ -21,7 +21,8 @@ OBJS = allformats.o         \
        cmftest.o	\
        cmfdec.o	\
        cmfvpb.o	\
-       bandwidth_measure.o      
+       bandwidth_measure.o      \
+       ptslist.o      
        
 
 # muxers/demuxers

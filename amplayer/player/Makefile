@@ -19,12 +19,5 @@
 	player_id.o \
 	player_ffmpeg_ctrl.o \
 	player_set_sys.o \
-	h263vld.o \
-	player_cache_file.o \
-	player_cache_mgt.o \
-	player_sub.o \
-	player_thumbnail.o \
-	player_mate.o \
-	player_profile.o \
-	version.o \
+	h263vld.o
 
