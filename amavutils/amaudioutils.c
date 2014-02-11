@@ -1,10 +1,8 @@
-#define LOG_TAG "AmAvutls"
 
 #include <stdlib.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <strings.h>
-#include <cutils/log.h>
 #include <sys/ioctl.h>
 
 #include "include/amutils_common.h"
@@ -22,28 +20,15 @@ typedef enum
 #define	AUDIODSP_CODEC_MIPS_OUT "/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq"
 #define AUDIODSP_CLK81_FRQ_LEVEL "/sys/class/aml_clk81/clk81_freq_level"
 
-#ifndef LOGD
-    #define LOGV ALOGV
-    #define LOGD ALOGD
-    #define LOGI ALOGI
-    #define LOGW ALOGW
-    #define LOGE ALOGE
-#endif
-
-#define LOG_FUNCTION_NAME LOGI("%s-%d\n",__FUNCTION__,__LINE__);
-///#define LOG_FUNCTION_NAME
-
 static int set_audiodsp_frelevel(int m1_flag, int coeff)
 {
 	int val;
 	if(m1_flag)	{		
-		val = get_sysfs_int(AUDIODSP_CODEC_MIPS_IN);
+		val = get_sys_int(AUDIODSP_CODEC_MIPS_IN);
 		if(val > 0 && coeff > 0){
 			val = coeff * val;
 			set_sys_int(AUDIODSP_CODEC_MIPS_OUT,val);
-			LOGI("m1:set_cpu_freq_scaling_based_auido %d\n",val);
 		}else{
-			LOGI("m1:set_cpu_freq_scaling_based_auido failed\n");
 			return -1;
 		}
 	}
@@ -76,7 +61,6 @@ int amaudio_utils_set_dsp_freqlevel(audiodsp_freqlevel_t level, int val)
 			break;
 
 		default:
-			LOGI("level not in range! level=%d\n", level);
 	}
 
 	return 0;

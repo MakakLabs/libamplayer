@@ -14,6 +14,10 @@ TARGET_OBJS += dsp/audiodsp-ctl.o
 TARGET_OBJS += audio_out/alsa-out.o
 TARGET_OBJS += audio_out/aml_resample.c
 TARGET_OBJS += audiodsp_update_format.c
+TARGET_OBJS += spdif_api.c
+TARGET_OBJS += pcmenc_api.c
+TARGET_OBJS += dts_transenc_api.c
+TARGET_OBJS += dts_enc.c
 
 INSTALL_DIR=${M_PREFIX}/lib
 
@@ -24,6 +28,7 @@ STAGING_DIR=$(shell pwd)/../../../staging
 CFLAGS+=-O2
 CFLAGS+=-I$(shell pwd) -I$(shell pwd)/include -I${STAGING_DIR}/include -I${STAGING_DIR}/usr/include -L${TARGET_DIR}/lib -L${TARGET_DIR}/usr/lib
 CFLAGS+=-DALSA_OUT -DENABLE_WAIT_FORMAT -fPIC
+CFLAGS+=-D_VERSION_ICS
 
 export CC CFLAGS
 

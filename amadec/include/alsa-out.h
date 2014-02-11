@@ -21,8 +21,5 @@ typedef struct {
     int stop_flag;
     int pause_flag;
     int wait_flag;
-    int mute_flag;
-    int pass_flag;
-    float volume_deamp;
 } alsa_param_t;
 #endif

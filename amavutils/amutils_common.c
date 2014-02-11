@@ -4,17 +4,8 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <strings.h>
-#include <cutils/log.h>
 #include <sys/ioctl.h>
 #include "include/amutils_common.h"
-
-#ifndef LOGD
-    #define LOGV ALOGV
-    #define LOGD ALOGD
-    #define LOGI ALOGI
-    #define LOGW ALOGW
-    #define LOGE ALOGE
-#endif
 
 int set_sys_int(const char *path,int val)
 {
@@ -26,14 +17,13 @@ int set_sys_int(const char *path,int val)
         	sprintf(bcmd,"%d",val);
         	write(fd,bcmd,strlen(bcmd));
         	close(fd);
-        	LOGI("\n switch %s clk81 freq\n", val?"high":"low");
         	return 0;
         }
 
         return -1;
 }
 
-int get_sysfs_int(const char *path)
+int get_sys_int(const char *path)
 {
     int fd;
     int val = 0;

@@ -1,21 +1,10 @@
 
-#define LOG_TAG "amavutils"
-
 #include <stdlib.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <strings.h>
-#include <cutils/log.h>
 #include <sys/ioctl.h>
 #include "include/Amsysfsutils.h"
-
-#ifndef LOGD
-    #define LOGV ALOGV
-    #define LOGD ALOGD
-    #define LOGI ALOGI
-    #define LOGW ALOGW
-    #define LOGE ALOGE
-#endif
 
 int amsysfs_set_sysfs_str(const char *path, const char *val)
 {
@@ -35,6 +24,7 @@ int  amsysfs_get_sysfs_str(const char *path, char *valstr, int size)
     int fd;
     fd = open(path, O_RDONLY);
     if (fd >= 0) {
+		memset(valstr,0,size);
         read(fd, valstr, size - 1);
         valstr[strlen(valstr)] = '\0';
         close(fd);
@@ -42,7 +32,6 @@ int  amsysfs_get_sysfs_str(const char *path, char *valstr, int size)
         sprintf(valstr, "%s", "fail");
         return -1;
     };
-    LOGI("get_sysfs_str=%s\n", valstr);
     return 0;
 }
 

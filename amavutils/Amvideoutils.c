@@ -1,11 +1,8 @@
 
-#define LOG_TAG "amavutils"
-
 #include <stdlib.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <strings.h>
-#include <cutils/log.h>
 #include <sys/ioctl.h>
 #include "include/Amvideoutils.h"
 #include "include/Amsysfsutils.h"
@@ -23,26 +20,15 @@
 #define VIDEO_GLOBAL_OFFSET_PATH "/sys/class/video/global_offset"
 #define FREE_SCALE_PATH  "/sys/class/graphics/fb0/free_scale"
 #define PPSCALER_PATH  "/sys/class/ppmgr/ppscaler"
+#define HDMI_AUTHENTICATE_PATH "/sys/module/hdmitx/parameters/hdmi_authenticated"
+
 
 static int rotation = 0;
 static int disp_width = 1920;
 static int disp_height = 1080;
 
-#ifndef LOGD
-    #define LOGV ALOGV
-    #define LOGD ALOGD
-    #define LOGI ALOGI
-    #define LOGW ALOGW
-    #define LOGE ALOGE
-#endif
-
-//#define LOG_FUNCTION_NAME LOGI("%s-%d\n",__FUNCTION__,__LINE__);
-#define LOG_FUNCTION_NAME
-
-
 int  amvideo_utils_get_global_offset(void)
 {
-    LOG_FUNCTION_NAME
     int offset = 0;
     char buf[SYSCMD_BUFSIZE];
     int ret;
@@ -50,15 +36,11 @@ int  amvideo_utils_get_global_offset(void)
     if (ret < 0) {
         return offset;
     }
-    if (sscanf(buf, "%d", &offset) == 1) {
-        LOGI("video global_offset %d\n", offset);
-    }
     return offset;
 }
 
 int amvideo_utils_set_virtual_position(int32_t x, int32_t y, int32_t w, int32_t h, int rotation)
 {
-    LOG_FUNCTION_NAME
     int video_fd;
     int dev_fd = -1, dev_w, dev_h, disp_w, disp_h, video_global_offset;
     int dst_x, dst_y, dst_w, dst_h;
@@ -66,8 +48,6 @@ int amvideo_utils_set_virtual_position(int32_t x, int32_t y, int32_t w, int32_t 
     int angle_fd = -1;
     int ret = -1;
     int axis[4];
-
-    LOGI("amvideo_utils_set_virtual_position:: x=%d y=%d w=%d h=%d\n", x, y, w, h);
 
     bzero(buf, SYSCMD_BUFSIZE);
 
@@ -89,7 +69,6 @@ int amvideo_utils_set_virtual_position(int32_t x, int32_t y, int32_t w, int32_t 
     read(dev_fd, buf, SYSCMD_BUFSIZE);
 
     if (sscanf(buf, "%dx%d", &dev_w, &dev_h) == 2) {
-        LOGI("device resolution %dx%d\n", dev_w, dev_h);
     } else {
         ret = -2;
         goto OUT;
@@ -131,7 +110,6 @@ int amvideo_utils_set_virtual_position(int32_t x, int32_t y, int32_t w, int32_t 
     angle_fd = open(ANGLE_PATH, O_WRONLY);
     if (angle_fd >= 0) {
         ioctl(angle_fd, PPMGR_IOC_SET_ANGLE, (rotation/90) & 3);
-        LOGI("set ppmgr angle %d\n", (rotation/90) & 3);
     }
 
     /* this is unlikely and only be used when ppmgr does not exist
@@ -152,7 +130,6 @@ int amvideo_utils_set_virtual_position(int32_t x, int32_t y, int32_t w, int32_t 
                 dst_w = dev_w;
                 dst_h = dev_h;
 
-                LOGI("centered overlay expansion");
             }
         }
     }
@@ -178,19 +155,15 @@ OUT:
     if (angle_fd >= 0) {
         close(angle_fd);
     }
-    LOGI("amvideo_utils_set_virtual_position (corrected):: x=%d y=%d w=%d h=%d\n", dst_x, dst_y, dst_w, dst_h);
 
     return ret;
 }
 
 int amvideo_utils_set_absolute_position(int32_t x, int32_t y, int32_t w, int32_t h, int rotation)
 {
-    LOG_FUNCTION_NAME
     int video_fd;
     int angle_fd = -1;
     int axis[4];
-
-    LOGI("amvideo_utils_set_absolute_position:: x=%d y=%d w=%d h=%d\n", x, y, w, h);
 
     video_fd = open(VIDEO_PATH, O_RDWR);
     if (video_fd < 0) {
@@ -200,7 +173,6 @@ int amvideo_utils_set_absolute_position(int32_t x, int32_t y, int32_t w, int32_t
     angle_fd = open(ANGLE_PATH, O_WRONLY);
     if (angle_fd >= 0) {
         ioctl(angle_fd, PPMGR_IOC_SET_ANGLE, (rotation/90) & 3);
-        LOGI("set ppmgr angle %d\n", (rotation/90) & 3);
         close(angle_fd);
     }
 
@@ -218,7 +190,6 @@ int amvideo_utils_set_absolute_position(int32_t x, int32_t y, int32_t w, int32_t
 
 int amvideo_utils_get_position(int32_t *x, int32_t *y, int32_t *w, int32_t *h)
 {
-    LOG_FUNCTION_NAME
     int video_fd;
     int axis[4];
 
@@ -241,7 +212,6 @@ int amvideo_utils_get_position(int32_t *x, int32_t *y, int32_t *w, int32_t *h)
 
 int amvideo_utils_get_screen_mode(int *mode)
 {
-    LOG_FUNCTION_NAME
     int video_fd;
     int screen_mode = 0;
 
@@ -261,7 +231,6 @@ int amvideo_utils_get_screen_mode(int *mode)
 
 int amvideo_utils_set_screen_mode(int mode)
 {
-    LOG_FUNCTION_NAME
     int screen_mode = mode;
     int video_fd;
 
@@ -279,18 +248,30 @@ int amvideo_utils_set_screen_mode(int mode)
 
 int amvideo_utils_get_video_angle(int *angle)
 {
-    LOG_FUNCTION_NAME
     int angle_fd;
     int angle_value = 0;
     
     angle_fd = open(ANGLE_PATH, O_RDONLY);
     if (angle_fd >= 0) {
         ioctl(angle_fd, PPMGR_IOC_GET_ANGLE, &angle_value);
-        //LOGI("get ppmgr angle %d\n", angle_value);
         close(angle_fd);
     }
     
     *angle = angle_value;
 
     return 0;
+}
+
+int amvideo_utils_get_hdmi_authenticate(void)
+{
+    int fd = -1;
+    int val = -1;
+    char  bcmd[16];
+    fd = open(HDMI_AUTHENTICATE_PATH, O_RDONLY);
+    if (fd >= 0) {
+        read(fd, bcmd, sizeof(bcmd));
+        val = strtol(bcmd, NULL, 10);
+        close(fd);
+    }
+    return val;   
 }

@@ -1,8 +1,10 @@
+NAME = libamavutils
+
 TARGET = libamavutils.so
 
-TARGET_OBJS  = am_itemlist.c
+TARGET_OBJS  = itemlist.c amconfigutils.c amdisplayutils.c amsysfsutils.c amutils_common.c Amvideoutils.c
 
-LDFLAGS += -shared -lm -lrt
+LDFLAGS += -shared -lm -lrt -fPIC
 
 TARGET_DIR=$(shell pwd)/../../../target
 STAGING_DIR=$(shell pwd)/../../../staging
